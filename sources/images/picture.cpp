@@ -381,7 +381,7 @@ namespace as1 { namespace images
             return count;
         }
 
-        void deletePictureThroughRetailSlot00(PICTURE* picture) noexcept
+        void deletePictureThroughVirtualDestructor(PICTURE* picture) noexcept
         {
             if (!picture)
                 return;
@@ -1471,7 +1471,7 @@ namespace as1 { namespace images
     PICTURE_RESOURCE::~PICTURE_RESOURCE()
     {
 
-        deletePictureThroughRetailSlot00(m_picture);
+        deletePictureThroughVirtualDestructor(m_picture);
     }
 
     PICTURE_RESOURCE* deletePictureResourceOwner(PICTURE_RESOURCE* owner, unsigned char deletingFlags) noexcept
@@ -1497,7 +1497,7 @@ namespace as1 { namespace images
     int PICTURE_RESOURCE::openFilename(const STRING& path)
     {
 
-        deletePictureThroughRetailSlot00(m_picture);
+        deletePictureThroughVirtualDestructor(m_picture);
 
         const char* text = path.c_str();
         if (containsCaseLiteral(text, ".tga", ".TGA"))

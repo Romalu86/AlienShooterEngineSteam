@@ -266,14 +266,14 @@ namespace as1
             float maxY = 0.0f;
         };
 
-        bool graphSub42BA90CallsApplicationPass(int pass) noexcept
+        bool isApplicationRenderPass(int pass) noexcept
         {
             return pass >= 0 && pass <= 10;
         }
 
-        int graphSub42BA90ApplicationPassSequenceIndex(int pass) noexcept
+        int applicationRenderPassSequenceIndex(int pass) noexcept
         {
-            return graphSub42BA90CallsApplicationPass(pass) ? pass : -1;
+            return isApplicationRenderPass(pass) ? pass : -1;
         }
 
         MapCameraClampRect buildMapCameraClampRect(const GRAPH& graph,
@@ -1171,7 +1171,7 @@ namespace as1
         VID loaded_vid;
         loaded_vid.nVid = nvid;
         loaded_vid.name = objectName;
-        loaded_vid.noCadr = 32000; // sentinel only for OBJ-side parameter probing, exactly as src2022 MAP::hostCreateVid does.
+        loaded_vid.noCadr = 32000; // sentinel only for OBJ-side parameter probing, as in the reference MAP::hostCreateVid flow.
         const size_t parameterBegin = res->position();
         loaded_vid.LoadParameters(res);
 
@@ -1407,7 +1407,7 @@ namespace as1
             return new VID_HARDWARE();
         if (spriteClass == B_BUILDEDTERRAIN)
             return new VID_SOFTWARE16();
-        if (m_graph->GraphFlag34Bit1())
+        if (m_graph->uses32BitColorDepth())
             return new VID_SOFTWARE();
         return new VID_SOFTWARE16();
     }
@@ -1892,7 +1892,7 @@ namespace as1
     void MAP::installScriptNativeContext()
     {
         ScriptNativeContext nativeContext;
-        nativeContext.queueMapLoadSlot18Flag40 = [](const STRING& path)
+        nativeContext.requestMapLoad = [](const STRING& path)
         {
             const std::uint32_t flags = core::ApplicationFlags() | application_flags::PendingCommandOrLoad;
             core::SetApplicationFlags(flags);
@@ -2667,7 +2667,7 @@ namespace as1
         }
 
         // Restore stacks are encoded as: count + count*4 command words + optional trailer.
-        // This mirrors the src2022 readSprite()/Action(act_restore, ptr.index(), version) flow while keeping the payload readable.
+        // This mirrors the reference readSprite()/Action(act_restore, ptr.index(), version) flow while keeping the payload readable.
         if (!state.words.empty())
         {
             const std::uint32_t count = state.words[0];

@@ -147,7 +147,7 @@ namespace as1
 
     }
 
-    void ENGINE::releaseEngineReferenceAC() noexcept
+    void ENGINE::releaseEngineCommandReference() noexcept
     {
         SPRITE* const ref = engineCommandReferenceOwner();
         if (!ref)
@@ -172,7 +172,7 @@ namespace as1
                                                 static_cast<int>(static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(this))),
                                                 0);
 
-        releaseEngineReferenceAC();
+        releaseEngineCommandReference();
 
         if (MAP* const owner = mapOwner())
         {
@@ -1093,8 +1093,8 @@ namespace as1
             static_cast<int>((runtimeFlags() >> 7u) & 1u),
             engineAccelerationDelayRef(),
             static_cast<int>(engineTargetSpeedRef() * 1000.0f),
-            PathSearchScore1(),
-            PathSearchScore0());
+            PathSearchResultScore(),
+            PathSearchSecondaryBestCost());
 
         if (SPRITE* const child = childChain())
         {

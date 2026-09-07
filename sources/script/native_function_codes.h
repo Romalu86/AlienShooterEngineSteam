@@ -19,7 +19,7 @@ namespace as1 { namespace script
         StringLength = 159, SetFlagman = 160, AskPlace = 161, GetVidData = 162, SetVidData = 163, IntToString = 164, Sin = 165, Cos = 166,
         MapSizeX = 167, MapSizeY = 168, Genocide = 169, ReplaceUnit = 170, Crc = 171, Printf = 172, ReloadVid = 173, FileWrite = 174, FileRead = 175,
         FileOpen = 176, FileClose = 177, FileCreate = 178, FileEof = 179,
-        SteamUnknown182 = 182, SteamUnknown183 = 183, SteamUnknown184 = 184, SteamUnknown185 = 185,
+        SteamReserved182 = 182, SteamReserved183 = 183, SteamReserved184 = 184, SteamReserved185 = 185,
         FileDataSave = 186, FileDataLoad = 187, FileExists = 188, SaveFolder = 189,
         StringLengthCompat = 205, StringLower = 206, StringUpper = 207, ToBase64 = 208,
         StoreSetAchievement = 210, StoreGetAchievement = 211, StoreClearAchievement = 212,

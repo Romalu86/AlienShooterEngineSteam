@@ -72,12 +72,11 @@ namespace as1 { namespace win
 
         constexpr std::uint32_t kFrameClampMs = 71u;
         constexpr std::uint32_t kDemoFrameToleranceMs = 20u;
-        constexpr float kSub40A290Half = 0.5f;
-        constexpr float kSub40A290Edge = 5.0f;
-        constexpr float kSub40A290AccelX = 0.039999999f;
-        constexpr float kSub40A290AccelY = 0.029999999f;
-        constexpr float kSub40A290TargetScale = 0.001f;
-        constexpr float kSub40A290PointerScale = -0.0040000002f;
+        constexpr float kCameraEdgeThreshold = 5.0f;
+        constexpr float kCameraAccelerationX = 0.039999999f;
+        constexpr float kCameraAccelerationY = 0.029999999f;
+        constexpr float kCameraTargetFollowScale = 0.001f;
+        constexpr float kCameraPointerFollowScale = -0.0040000002f;
 
         float dwordAsFloat(std::uint32_t value) noexcept
         {
@@ -268,7 +267,7 @@ namespace as1 { namespace win
                 static_cast<std::size_t>(index & 3) * core::retail_application_layout::PlayerSlotStride;
         }
 
-        void deleteVidThroughRetailSlot04(VID* vid) noexcept
+        void deleteVidThroughVirtualDestructor(VID* vid) noexcept
         {
             if (!vid)
                 return;
@@ -1084,7 +1083,7 @@ namespace as1 { namespace win
                 continue;
             if (MAP* const map = MAP::Current())
                 (void)map->ReleaseVidForScalarDeletingDestructor(vid);
-            deleteVidThroughRetailSlot04(vid);
+            deleteVidThroughVirtualDestructor(vid);
             appVidTable.setSlotCell(index, nullptr);
         }
         appVidTable.setStoredCount(0);
@@ -2132,7 +2131,7 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
         {
             GRAPH* const graph = GRAPH::CurrentGraph();
 
-            if (graph && graph->GraphFlag34Bit0())
+            if (graph && graph->isModalRenderStateActive())
                 return true;
             if (debugMode && (shellFlagsStorage(this) & kShellTogglePause) && inputState(this).lastCode != 0x70u)
                 return true;
@@ -2289,7 +2288,7 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
             target->dispatchSpriteCommandMask(commandMask);
     }
 
-    SPRITE* ApplicationWin::childCommandTargetByVidSlot5C(SPRITE* target) const noexcept
+    SPRITE* ApplicationWin::linkedVidChildCommandTarget(SPRITE* target) const noexcept
     {
 
         if (!target)
@@ -2301,9 +2300,9 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
         return (child->Vid() == targetVid->linkedVid()) ? child : nullptr;
     }
 
-    void ApplicationWin::dispatchChildCommandIfVidSlot5CMatches(SPRITE* target, const std::uint32_t* commandMask) const noexcept
+    void ApplicationWin::dispatchLinkedVidChildCommandMask(SPRITE* target, const std::uint32_t* commandMask) const noexcept
     {
-        if (SPRITE* child = childCommandTargetByVidSlot5C(target))
+        if (SPRITE* child = linkedVidChildCommandTarget(target))
             dispatchSpriteCommandMask(child, commandMask);
     }
 
@@ -2323,7 +2322,7 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
         splitPackedDirectionalMask(packed, positive, negative);
         const std::uint32_t commandMask[2] = {positive, negative};
         dispatchSpriteCommandMask(target, commandMask);
-        dispatchChildCommandIfVidSlot5CMatches(target, commandMask);
+        dispatchLinkedVidChildCommandMask(target, commandMask);
     }
 
     void ApplicationWin::dispatchAuxiliaryControlMovementMask()
@@ -2342,7 +2341,7 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
         splitPackedDirectionalMask(packed, positive, negative);
         const std::uint32_t commandMask[2] = {positive, negative};
         dispatchSpriteCommandMask(target, commandMask);
-        dispatchChildCommandIfVidSlot5CMatches(target, commandMask);
+        dispatchLinkedVidChildCommandMask(target, commandMask);
     }
 
     void ApplicationWin::graphFrameDispatch(bool worldTick)
@@ -2368,7 +2367,7 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
                 dispatchSpriteCommandMask(primary, zeroMask);
 
                 primary = controlledSpriteForPlayer(static_cast<int>(as1::core::ActivePlayerIndex()));
-                if (childCommandTargetByVidSlot5C(primary))
+                if (linkedVidChildCommandTarget(primary))
                 {
                     primary = controlledSpriteForPlayer(static_cast<int>(as1::core::ActivePlayerIndex()));
                     dispatchSpriteCommandMask(primary->childChain(), zeroMask);
@@ -2387,7 +2386,7 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
         dispatchSpriteCommandMask(auxiliary, zeroMask);
 
         auxiliary = activeAuxiliarySprite();
-        if (childCommandTargetByVidSlot5C(auxiliary))
+        if (linkedVidChildCommandTarget(auxiliary))
         {
             auxiliary = activeAuxiliarySprite();
             dispatchSpriteCommandMask(auxiliary->childChain(), zeroMask);
@@ -2550,7 +2549,7 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
         return out;
     }
 
-    void ApplicationWin::dispatchInputOwner2294() noexcept
+    void ApplicationWin::updateTooltipFromInput() noexcept
     {
 
         (void)cachedTooltipText();
@@ -2666,23 +2665,23 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
 
         if ((mode & 0x21u) != 0)
         {
-            if (cameraX87LessEqualOrUnordered(clientX, kSub40A290Edge) && (mode & 0x01u) != 0)
+            if (cameraX87LessEqualOrUnordered(clientX, kCameraEdgeThreshold) && (mode & 0x01u) != 0)
             {
                 if (cameraX87LessOrUnordered(-maxX, velocityX))
-                    velocityX -= kSub40A290AccelX;
+                    velocityX -= kCameraAccelerationX;
             }
-            else if ((graphRight - kSub40A290Edge) > clientX && (mode & 0x01u) != 0)
+            else if ((graphRight - kCameraEdgeThreshold) > clientX && (mode & 0x01u) != 0)
             {
 
                 if ((inputFlags & 0x80u) != 0 && (mode & 0x20u) != 0)
                 {
                     if (cameraX87LessOrUnordered(-maxX, velocityX))
-                        velocityX -= kSub40A290AccelX;
+                        velocityX -= kCameraAccelerationX;
                 }
                 else if ((inputFlags & 0x0100u) != 0 && (mode & 0x20u) != 0)
                 {
                     if (cameraX87LessOrUnordered(velocityX, maxX))
-                        velocityX += kSub40A290AccelX;
+                        velocityX += kCameraAccelerationX;
                 }
                 else
                     velocityX = 0.0f;
@@ -2690,37 +2689,37 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
             else if ((mode & 0x01u) != 0)
             {
                 if (cameraX87LessOrUnordered(velocityX, maxX))
-                    velocityX += kSub40A290AccelX;
+                    velocityX += kCameraAccelerationX;
             }
             else if ((inputFlags & 0x80u) != 0 && (mode & 0x20u) != 0)
             {
                 if (cameraX87LessOrUnordered(-maxX, velocityX))
-                    velocityX -= kSub40A290AccelX;
+                    velocityX -= kCameraAccelerationX;
             }
             else if ((inputFlags & 0x0100u) != 0 && (mode & 0x20u) != 0)
             {
                 if (cameraX87LessOrUnordered(velocityX, maxX))
-                    velocityX += kSub40A290AccelX;
+                    velocityX += kCameraAccelerationX;
             }
             else
                 velocityX = 0.0f;
 
-            if (cameraX87LessEqualOrUnordered(clientY, kSub40A290Edge) && (mode & 0x01u) != 0)
+            if (cameraX87LessEqualOrUnordered(clientY, kCameraEdgeThreshold) && (mode & 0x01u) != 0)
             {
                 if (cameraX87LessOrUnordered(-maxY, velocityY))
-                    velocityY -= kSub40A290AccelY;
+                    velocityY -= kCameraAccelerationY;
             }
-            else if ((graphBottom - kSub40A290Edge) > clientY && (mode & 0x01u) != 0)
+            else if ((graphBottom - kCameraEdgeThreshold) > clientY && (mode & 0x01u) != 0)
             {
                 if ((inputFlags & 0x0400u) != 0 && (mode & 0x20u) != 0)
                 {
                     if (cameraX87LessOrUnordered(-maxY, velocityY))
-                        velocityY -= kSub40A290AccelY;
+                        velocityY -= kCameraAccelerationY;
                 }
                 else if ((inputFlags & 0x0200u) != 0 && (mode & 0x20u) != 0)
                 {
                     if (cameraX87LessOrUnordered(velocityY, maxY))
-                        velocityY += kSub40A290AccelY;
+                        velocityY += kCameraAccelerationY;
                 }
                 else
                     velocityY = 0.0f;
@@ -2728,17 +2727,17 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
             else if ((mode & 0x01u) != 0)
             {
                 if (cameraX87LessOrUnordered(velocityY, maxY))
-                    velocityY += kSub40A290AccelY;
+                    velocityY += kCameraAccelerationY;
             }
             else if ((inputFlags & 0x0400u) != 0 && (mode & 0x20u) != 0)
             {
                 if (cameraX87LessOrUnordered(-maxY, velocityY))
-                    velocityY -= kSub40A290AccelY;
+                    velocityY -= kCameraAccelerationY;
             }
             else if ((inputFlags & 0x0200u) != 0 && (mode & 0x20u) != 0)
             {
                 if (cameraX87LessOrUnordered(velocityY, maxY))
-                    velocityY += kSub40A290AccelY;
+                    velocityY += kCameraAccelerationY;
             }
             else
                 velocityY = 0.0f;
@@ -2758,12 +2757,12 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
             velocityX = static_cast<float>(
                 ((static_cast<double>(target->X()) - static_cast<double>(cameraShiftX)) -
                  static_cast<double>(graphWidth) * 0.5) *
-                static_cast<double>(kSub40A290TargetScale));
+                static_cast<double>(kCameraTargetFollowScale));
             velocityY = static_cast<float>(
                 (((static_cast<double>(target->Y()) - static_cast<double>(target->Z())) -
                   static_cast<double>(cameraShiftY)) -
                  static_cast<double>(graphHeight) * 0.5) *
-                static_cast<double>(kSub40A290TargetScale));
+                static_cast<double>(kCameraTargetFollowScale));
         }
         else if (target && (mode & 0x08u) != 0 && noVelocity)
         {
@@ -2775,10 +2774,10 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
                   static_cast<double>(cameraShiftY) + static_cast<double>(clientY)) * 0.5));
             velocityX = static_cast<float>(
                 (static_cast<double>(graphWidth) * 0.5 - static_cast<double>(pointerTargetX)) *
-                static_cast<double>(kSub40A290PointerScale));
+                static_cast<double>(kCameraPointerFollowScale));
             velocityY = static_cast<float>(
                 (static_cast<double>(graphHeight) * 0.5 - static_cast<double>(pointerTargetY)) *
-                static_cast<double>(kSub40A290PointerScale));
+                static_cast<double>(kCameraPointerFollowScale));
         }
         else if (target && (mode & 0x10u) != 0 && noVelocity)
         {
@@ -2819,7 +2818,7 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
     void ApplicationWin::dispatchInputControls(bool worldTick)
     {
         (void)worldTick;
-        dispatchInputOwner2294();
+        updateTooltipFromInput();
         updateCameraFromInput();
     }
 

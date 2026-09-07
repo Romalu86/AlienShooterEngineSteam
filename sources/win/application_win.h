@@ -153,8 +153,8 @@ namespace as1 { namespace win
         void frameDispatchPrologue(bool worldTick);
         SPRITE* activeAuxiliarySprite() const noexcept;
         void dispatchSpriteCommandMask(SPRITE* target, const std::uint32_t* commandMask) const noexcept;
-        SPRITE* childCommandTargetByVidSlot5C(SPRITE* target) const noexcept;
-        void dispatchChildCommandIfVidSlot5CMatches(SPRITE* target, const std::uint32_t* commandMask) const noexcept;
+        SPRITE* linkedVidChildCommandTarget(SPRITE* target) const noexcept;
+        void dispatchLinkedVidChildCommandMask(SPRITE* target, const std::uint32_t* commandMask) const noexcept;
         void dispatchPrimaryControlMovementMask();
         void dispatchAuxiliaryControlMovementMask();
         void graphFrameDispatch(bool worldTick);
@@ -163,7 +163,7 @@ namespace as1 { namespace win
         void prepareInputAndDispatchControls(bool worldTick);
         int selectFrameSprite() noexcept;
         as1::STRING* buildMouseTipText(as1::STRING* out);
-        void dispatchInputOwner2294() noexcept;
+        void updateTooltipFromInput() noexcept;
         void updateCameraFromInput();
         bool cameraOwnerReady() const noexcept;
         void dispatchStartupPlayerControls();

@@ -321,7 +321,7 @@ namespace as1
         m_items = nullptr;
     }
 
-    SPRITE* SPRITE_POINTER_LIST::NextIterateNon0(int* cursor) const
+    SPRITE* SPRITE_POINTER_LIST::NextNonNull(int* cursor) const
     {
         if (!cursor)
             return nullptr;

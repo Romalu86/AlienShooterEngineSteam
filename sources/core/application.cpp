@@ -75,7 +75,7 @@ namespace as1 { namespace core
         SCRIPT g_applicationScriptOwner;
 #endif
 
-        int class7FsubFtolLow32(float lhs, float rhs) noexcept
+        int subtractFloatToIntTruncated(float lhs, float rhs) noexcept
         {
 
             const long double value =
@@ -89,11 +89,11 @@ namespace as1 { namespace core
                 static_cast<std::uint64_t>(converted)));
         }
 
-        int class7FsubStoreF32FtolLow32(float lhs, float rhs) noexcept
+        int subtractRoundedFloatToInt(float lhs, float rhs) noexcept
         {
             const float rounded = static_cast<float>(
                 static_cast<long double>(lhs) - static_cast<long double>(rhs));
-            return class7FsubFtolLow32(rounded, 0.0f);
+            return subtractFloatToIntTruncated(rounded, 0.0f);
         }
 
         bool debugPassReady(const ApplicationDebugPassContext& context)
@@ -163,8 +163,8 @@ namespace as1 { namespace core
                 {
                     const int reverse = Speed() >= 0.0f ? 0 : 128;
 
-                    const int dx = class7FsubStoreF32FtolLow32(target->X(), X());
-                    const int dy = class7FsubFtolLow32(target->Y(), Y());
+                    const int dx = subtractRoundedFloatToInt(target->X(), X());
+                    const int dy = subtractFloatToIntTruncated(target->Y(), Y());
 
                     const int desired = AngleFromXY(dx, dy, nullptr).Int() + reverse;
                     const std::uint32_t delta = CurrentTimeMilliseconds() - PreviousWorldTimeMilliseconds();
@@ -550,7 +550,7 @@ namespace as1 { namespace core
 #ifdef _WIN32
         return ApplicationFlags();
 #else
-        return flagsSlot04;
+        return fallbackFlags;
 #endif
     }
 
@@ -559,7 +559,7 @@ namespace as1 { namespace core
 #ifdef _WIN32
         SetApplicationFlags(value);
 #else
-        flagsSlot04 = value;
+        fallbackFlags = value;
 #endif
     }
 
@@ -747,7 +747,7 @@ namespace as1 { namespace core
 #ifdef _WIN32
         return applicationMenu().selectedSprite();
 #else
-        return currentFrameSlot260;
+        return currentFrameSpriteFallback;
 #endif
     }
 
@@ -756,7 +756,7 @@ namespace as1 { namespace core
 #ifdef _WIN32
         applicationMenu().setSelectedSprite(sprite);
 #else
-        currentFrameSlot260 = sprite;
+        currentFrameSpriteFallback = sprite;
 #endif
     }
 
@@ -765,8 +765,8 @@ namespace as1 { namespace core
 #ifdef _WIN32
         return applicationMenu().clearSelectedSpriteIfMatches(sprite);
 #else
-        if (currentFrameSlot260 != sprite) return false;
-        currentFrameSlot260 = nullptr;
+        if (currentFrameSpriteFallback != sprite) return false;
+        currentFrameSpriteFallback = nullptr;
         return true;
 #endif
     }

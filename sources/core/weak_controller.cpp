@@ -20,7 +20,7 @@ namespace as1
     {
         namespace
         {
-            constexpr int kWeakControllerMaxLinks436360 = 6;
+            constexpr int kWeakControllerMaxLinks = 6;
 
 
             int g_pathResultScore = 0;
@@ -123,7 +123,7 @@ namespace as1
                 return static_cast<std::int32_t>(static_cast<std::uint32_t>(static_cast<std::uint64_t>(static_cast<std::uint32_t>(a)) * static_cast<std::uint32_t>(b)));
             }
 
-            constexpr std::uint32_t flt_478F94_bits[256] =
+            constexpr std::uint32_t kWeakControllerSinTableBits[256] =
             {
                 0x00000000u, 0x3CC90AB0u, 0x3D48FB2Fu, 0x3D96A905u, 0x3DC8BD36u, 0x3DFAB273u, 0x3E164083u, 0x3E2F10A2u,
                 0x3E47C5C2u, 0x3E605C13u, 0x3E78CFCCu, 0x3E888E93u, 0x3E94A031u, 0x3EA09AE5u, 0x3EAC7CD4u, 0x3EB8442Au,
@@ -159,7 +159,7 @@ namespace as1
                 0xBE47C5C2u, 0xBE2F10A2u, 0xBE164083u, 0xBDFAB273u, 0xBDC8BD36u, 0xBD96A905u, 0xBD48FB30u, 0xBCC90AB0u,
             };
 
-            constexpr std::uint32_t flt_479394_bits[256] =
+            constexpr std::uint32_t kWeakControllerCosTableBits[256] =
             {
                 0x3F800000u, 0x3F7FEC43u, 0x3F7FB10Fu, 0x3F7F4E6Du, 0x3F7EC46Du, 0x3F7E1324u, 0x3F7D3AACu, 0x3F7C3B28u,
                 0x3F7B14BEu, 0x3F79C79Du, 0x3F7853F8u, 0x3F76BA07u, 0x3F74FA0Bu, 0x3F731447u, 0x3F710908u, 0x3F6ED89Eu,
@@ -698,7 +698,7 @@ namespace as1
             link.crossingLinkToken = 0;
             link.facing = angleByte;
 
-            if (self->m_linkCount >= kWeakControllerMaxLinks436360)
+            if (self->m_linkCount >= kWeakControllerMaxLinks)
             {
                 LOG::Write("!!!ERROR!!!R_DOT: Too many links in %i,%i,%i",
                     self->m_x, self->m_y, self->m_id);
@@ -713,7 +713,7 @@ namespace as1
             link.reciprocalIndex = self->m_linkCount - 1;
             link.facing = (angleByte - 0x80u) & 0xFFu;
 
-            if (target->m_linkCount >= kWeakControllerMaxLinks436360)
+            if (target->m_linkCount >= kWeakControllerMaxLinks)
             {
                 LOG::Write("!!!ERROR!!!R_DOT: Too many links2 in %i,%i,%i",
                     target->x(), target->y(), target->id());

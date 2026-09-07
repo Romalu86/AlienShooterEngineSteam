@@ -13,8 +13,8 @@
 namespace as1
 {
 
-    int PathSearchScore0() noexcept;
-    int PathSearchScore1() noexcept;
+    int PathSearchSecondaryBestCost() noexcept;
+    int PathSearchResultScore() noexcept;
     class SPRITE_POINTER_LIST;
     class SPRITE_LIST;
     class VID;
@@ -530,8 +530,8 @@ namespace as1
         int animationFrameTime() const noexcept { return m_animationFrameTime; }
         void setAnimationFrameTime(int value) noexcept { m_animationFrameTime = value; }
         void releaseBestTargetSprite() noexcept;
-        void deleteChildChainSlot40() noexcept;
-        void clearChildBacklinkSlot44() noexcept;
+        void deleteChildChain() noexcept;
+        void clearChildBacklink() noexcept;
         void releaseActionAuxState() noexcept;
         void releaseCommandRecordsRetailTail() noexcept;
         const std::array<std::uint32_t, 2>& actionAuxCommandMask() const noexcept { return hostState().actionAuxCommandMask; }

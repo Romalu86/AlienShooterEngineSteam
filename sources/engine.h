@@ -87,7 +87,7 @@ namespace as1
 
     private:
         friend struct EngineRetailLayoutProbe;
-        void releaseEngineReferenceAC() noexcept;
+        void releaseEngineCommandReference() noexcept;
         void releaseEngineRuntimeState() noexcept;
 
 #if UINTPTR_MAX == 0xFFFFFFFFu

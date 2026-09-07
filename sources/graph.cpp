@@ -489,7 +489,7 @@ namespace as1
             BASE_TEXTURE::ConfigureCaps(textureCaps);
         }
 
-        void invokeBaseTextureRetailDeleteSlot00(BASE_TEXTURE* texture) noexcept
+        void invokeBaseTextureVirtualDestructor(BASE_TEXTURE* texture) noexcept
         {
             if (!texture)
                 return;
@@ -502,11 +502,11 @@ namespace as1
 #endif
         }
 
-        void deleteBaseTextureThroughRetailSlot00(BASE_TEXTURE*& texture) noexcept
+        void deleteBaseTextureThroughVirtualDestructor(BASE_TEXTURE*& texture) noexcept
         {
             if (!texture)
                 return;
-            invokeBaseTextureRetailDeleteSlot00(texture);
+            invokeBaseTextureVirtualDestructor(texture);
             texture = nullptr;
         }
         IDirect3DSurface8* graphSurface(void* p) { return static_cast<IDirect3DSurface8*>(p); }
@@ -1724,7 +1724,7 @@ namespace as1
             return;
 
 #ifdef _WIN32
-        invokeBaseTextureRetailDeleteSlot00(m_lightBuffer);
+        invokeBaseTextureVirtualDestructor(m_lightBuffer);
 #else
         delete m_lightBuffer;
 #endif
@@ -3389,9 +3389,9 @@ namespace as1
             m_tempBuffer = nullptr;
         }
 
-        deleteBaseTextureThroughRetailSlot00(m_alphaBuffer);
-        deleteBaseTextureThroughRetailSlot00(m_lightBuffer);
-        deleteBaseTextureThroughRetailSlot00(m_hiBuffer);
+        deleteBaseTextureThroughVirtualDestructor(m_alphaBuffer);
+        deleteBaseTextureThroughVirtualDestructor(m_lightBuffer);
+        deleteBaseTextureThroughVirtualDestructor(m_hiBuffer);
 
         if (m_device)
         {

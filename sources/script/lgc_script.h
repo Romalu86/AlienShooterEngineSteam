@@ -80,7 +80,7 @@ namespace as1
 
     struct ScriptNativeContext
     {
-        std::function<void(const STRING& path)> queueMapLoadSlot18Flag40;
+        std::function<void(const STRING& path)> requestMapLoad;
     };
 
 

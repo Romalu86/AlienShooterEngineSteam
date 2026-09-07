@@ -88,8 +88,8 @@ namespace as1
             ChangeCoordinateZ = 204u,
         };
 
-        int g_pathSearchScore0 = 0;
-        int g_pathSearchScore1 = 0;
+        int g_pathSearchSecondaryBestCost = 0;
+        int g_pathSearchResultScore = 0;
 
         constexpr char kTrainCollapseBeginLog[] =
         {
@@ -910,9 +910,6 @@ namespace as1
             return out;
         }
 
-        constexpr DWORD kSub44B310ResumeFlag80 = 0x80u;
-        constexpr DWORD kSub44B310DirectionFlag01 = 0x01u;
-
     }
 
     void SPRITE::initializeRetailStartupTrigTables() noexcept
@@ -1108,8 +1105,8 @@ namespace as1
         return *this;
     }
 
-    int PathSearchScore0() noexcept { return g_pathSearchScore0; }
-    int PathSearchScore1() noexcept { return g_pathSearchScore1; }
+    int PathSearchSecondaryBestCost() noexcept { return g_pathSearchSecondaryBestCost; }
+    int PathSearchResultScore() noexcept { return g_pathSearchResultScore; }
 
     SpriteCommandStack::SpriteCommandStack(SpriteCommandStack&& other) noexcept
         : m_commandRecords(other.m_commandRecords)
@@ -5385,7 +5382,7 @@ namespace as1
             ActionAuxState* const aux = m_actionAuxState;
             const std::uint32_t elapsed = now - aux->effectTimestamp;
             std::uint32_t duration = static_cast<std::uint32_t>(
-                m_vid->weaponIntAt(static_cast<int>(VID::WeaponFieldOffset::Unknown40)));
+                m_vid->weaponIntAt(static_cast<int>(VID::WeaponFieldOffset::EffectRefreshInterval)));
 
             if (duration == 999999u)
             {
@@ -5721,7 +5718,7 @@ namespace as1
             }
 
             const std::uint32_t refreshInterval = static_cast<std::uint32_t>(
-                m_vid->weaponIntAt(static_cast<int>(VID::WeaponFieldOffset::Unknown40)));
+                m_vid->weaponIntAt(static_cast<int>(VID::WeaponFieldOffset::EffectRefreshInterval)));
             if (refreshInterval != 999999u &&
                 now - m_actionAuxState->effectTimestamp > refreshInterval)
             {
@@ -6057,7 +6054,7 @@ namespace as1
         m_bestTargetSprite = nullptr;
     }
 
-    void SPRITE::deleteChildChainSlot40() noexcept
+    void SPRITE::deleteChildChain() noexcept
     {
         while (SPRITE* child = m_childChain)
             DeleteSpriteThroughVirtualDeletingDestructor(child);
@@ -6110,7 +6107,7 @@ namespace as1
         return count;
     }
 
-    void SPRITE::clearChildBacklinkSlot44() noexcept
+    void SPRITE::clearChildBacklink() noexcept
     {
         if (SPRITE* backlink = m_childBacklink)
             backlink->m_childChain = nullptr;
@@ -7254,7 +7251,7 @@ namespace as1
 
         const int bucket = sprite->armyIndex();
         vidFrameTimeSum += vid->animationFrameDuration(bucket);
-        weaponMetricSum += vid->getWeaponValue24Scaled();
+        weaponMetricSum += vid->productionCost();
 
         int routeMetric = 0;
         if (fixedDistance != 0)
@@ -7780,8 +7777,8 @@ namespace as1
 
     int SPRITE::createPathSpritesFromBuffer(core::WeakController* pathNode, SPRITE_POINTER_LIST* list, int nvid) noexcept
     {
-        g_pathSearchScore1 = core::pathResultScore();
-        g_pathSearchScore0 = core::pathSecondaryBestCost();
+        g_pathSearchResultScore = core::pathResultScore();
+        g_pathSearchSecondaryBestCost = core::pathSecondaryBestCost();
         list->releaseRepeatedReferencesRetail();
 
         int result = pathBufferSizeRef();
@@ -9331,8 +9328,8 @@ namespace as1
         setGoalSprite(nullptr);
 
         releaseBestTargetSprite();
-        deleteChildChainSlot40();
-        clearChildBacklinkSlot44();
+        deleteChildChain();
+        clearChildBacklink();
 
         if (!isEmptyVid)
         {
@@ -10942,7 +10939,7 @@ namespace as1
 
         case static_cast<std::uint32_t>(ActionCode::ACT_SET_DEATH_TIMER):
         {
-            const std::uint32_t requestedValue10 = static_cast<std::uint32_t>(argument1);
+            const std::uint32_t requestedLifetime = static_cast<std::uint32_t>(argument1);
 
             if (!m_actionAuxState)
             {
@@ -10952,7 +10949,7 @@ namespace as1
                     initializeActionAuxState(this);
             }
 
-            m_actionAuxState->lifetimeRemaining = requestedValue10;
+            m_actionAuxState->lifetimeRemaining = requestedLifetime;
 
             break;
         }

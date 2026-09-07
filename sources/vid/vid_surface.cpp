@@ -86,7 +86,7 @@ namespace as1
 
 
         template <class T>
-        void deleteThroughRetailSlot00(T* owner) noexcept
+        void deleteThroughVirtualDestructor(T* owner) noexcept
         {
             if (!owner)
                 return;
@@ -112,7 +112,7 @@ namespace as1
 
                 for (int frame = 0; frame < frameCount; ++frame)
                 {
-                    deleteThroughRetailSlot00(table[frame]);
+                    deleteThroughVirtualDestructor(table[frame]);
                 }
             }
 

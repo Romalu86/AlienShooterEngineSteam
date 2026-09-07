@@ -130,7 +130,7 @@ namespace as1
             return static_cast<int>(reinterpret_cast<std::intptr_t>(file));
         }
 
-        const input::InputMessageState& scriptApplicationInputState254() noexcept
+        const input::InputMessageState& scriptApplicationInputState() noexcept
         {
             if (void* const owner = core::ApplicationPhysicalOwner())
                 return *reinterpret_cast<const input::InputMessageState*>(
@@ -1148,7 +1148,7 @@ namespace as1
 
     namespace
     {
-        int retailCtypeInput41BC50(unsigned char c) noexcept
+        int retailCtypeArgument(unsigned char c) noexcept
         {
 #if defined(_MSC_VER) && defined(_M_IX86)
             return static_cast<int>(static_cast<signed char>(c));
@@ -1161,17 +1161,17 @@ namespace as1
 
         bool isIdentifierStart(unsigned char c)
         {
-            return std::isalpha(retailCtypeInput41BC50(c)) != 0 || c == '_';
+            return std::isalpha(retailCtypeArgument(c)) != 0 || c == '_';
         }
 
         bool isIdentifierChar(unsigned char c)
         {
-            return std::isalnum(retailCtypeInput41BC50(c)) != 0 || c == '_';
+            return std::isalnum(retailCtypeArgument(c)) != 0 || c == '_';
         }
 
         bool isScriptWhitespace(unsigned char c)
         {
-            return std::isspace(retailCtypeInput41BC50(c)) != 0;
+            return std::isspace(retailCtypeArgument(c)) != 0;
         }
     }
 
@@ -3033,7 +3033,7 @@ namespace as1
         const int nativeCode = parseConstantIntExpression();
 
         const unsigned char previous = sourceStorage()[static_cast<std::size_t>(sourceCursorOffset() - 1)];
-        if (!std::isdigit(retailCtypeInput41BC50(previous)))
+        if (!std::isdigit(retailCtypeArgument(previous)))
         {
             reportCompileError(13, "extern function code", 0);
             std::exit(1);
@@ -3124,13 +3124,6 @@ namespace as1
                 ? script::ParseStackIntegerText(value.text.c_str())
                 : value.intValue;
         }
-
-        int stackObjectNumeric41F2D0(const script::StackObject& value)
-        {
-            return stackValueToInteger(value);
-        }
-
-
         int scriptSpritePointerValue(SPRITE* sprite) noexcept
         {
             return sprite
@@ -3584,7 +3577,7 @@ namespace as1
                         if (arrayVmActive != 0 && (baseRecord->flags & script::STACK_OBJECT_ARRAY) == 0)
                         {
                             std::string text = baseRecord->text.str();
-                            const int numeric = stackObjectNumeric41F2D0(*source);
+                            const int numeric = stackValueToInteger(*source);
                             text[static_cast<std::size_t>(arrayVmOffset)] = static_cast<char>(numeric & 0xFF);
                             baseRecord->text.AssignBytes(text.data(), text.size());
                         }
@@ -3598,7 +3591,7 @@ namespace as1
                     }
                     else
                     {
-                        const int numeric = stackObjectNumeric41F2D0(*source);
+                        const int numeric = stackValueToInteger(*source);
                         target->flags = static_cast<std::uint8_t>(target->flags & ~static_cast<std::uint8_t>(script::STACK_OBJECT_REF | script::STACK_OBJECT_CHAR_WRITE));
                         target->intValue = numeric;
                         if ((source->flags & script::STACK_OBJECT_REF) != 0)
@@ -3656,7 +3649,7 @@ namespace as1
             case script::VmOpcode::LogicalNot:
             {
                 script::StackObject* top = mutableExecutionStackStorageAt(m_physical.stackCount - 1);
-                const int value = stackObjectNumeric41F2D0(*top);
+                const int value = stackValueToInteger(*top);
                 top->flags = script::STACK_OBJECT_INT;
                 if (opcode == script::opcodeValue(script::VmOpcode::Negate))
                     top->intValue = -value;
@@ -3670,7 +3663,7 @@ namespace as1
             {
                 --m_physical.stackCount;
                 script::StackObject* cond = mutableExecutionStackStorageAt(m_physical.stackCount);
-                const int condValue = stackObjectNumeric41F2D0(*cond);
+                const int condValue = stackValueToInteger(*cond);
                 int payload = 0;
                 readVmDword(bytecodeStorage(), cursor, payload);
                 cursor += condValue ? 4 : payload;
@@ -3704,7 +3697,7 @@ namespace as1
             {
                 --m_physical.stackCount;
                 script::StackObject* cond = mutableExecutionStackStorageAt(m_physical.stackCount);
-                const int condValue = stackObjectNumeric41F2D0(*cond);
+                const int condValue = stackValueToInteger(*cond);
                 int payload = 0;
                 readVmDword(bytecodeStorage(), cursor, payload);
 
@@ -3760,11 +3753,11 @@ namespace as1
 
                 --m_physical.stackCount;
                 script::StackObject* returnCursorObject = mutableExecutionStackStorageAt(m_physical.stackCount);
-                const int returnCursor = stackObjectNumeric41F2D0(*returnCursorObject);
+                const int returnCursor = stackValueToInteger(*returnCursorObject);
 
                 --m_physical.stackCount;
                 script::StackObject* savedFrameObject = mutableExecutionStackStorageAt(m_physical.stackCount);
-                frameBase = stackObjectNumeric41F2D0(*savedFrameObject);
+                frameBase = stackValueToInteger(*savedFrameObject);
                 cursor = returnCursor;
                 controlAnchor = cursor;
 
@@ -3778,7 +3771,7 @@ namespace as1
 #endif
 
                     if (returnCursor >= bytecodeLimit && result == 0)
-                        result = stackObjectNumeric41F2D0(returnedValue);
+                        result = stackValueToInteger(returnedValue);
                 }
                 break;
             }
@@ -3786,7 +3779,7 @@ namespace as1
             {
                 --m_physical.stackCount;
                 script::StackObject* const indexObject = mutableExecutionStackStorageAt(m_physical.stackCount);
-                arrayVmOffset = stackObjectNumeric41F2D0(*indexObject);
+                arrayVmOffset = stackValueToInteger(*indexObject);
                 arrayVmActive = 1;
                 break;
             }
@@ -3797,7 +3790,7 @@ namespace as1
                 if (opcode == kRetailResultProbeOpcode)
                 {
                     const script::StackObject* top = mutableExecutionStackStorageAt(m_physical.stackCount - 1);
-                    if (stackObjectNumeric41F2D0(*top) == arg3)
+                    if (stackValueToInteger(*top) == arg3)
                         result = 1;
                 }
                 dispatchNativeFunction(static_cast<int>(opcode));
@@ -4472,8 +4465,8 @@ namespace as1
                         win::applicationWinInstance()->setPendingCommand(path);
                         win::applicationWinInstance()->setFlags(flags);
                 #else
-                        if (script->host().m_nativeContext.queueMapLoadSlot18Flag40)
-                            script->host().m_nativeContext.queueMapLoadSlot18Flag40(path);
+                        if (script->host().m_nativeContext.requestMapLoad)
+                            script->host().m_nativeContext.requestMapLoad(path);
                 #endif
                         return 0;
             }
@@ -4627,17 +4620,17 @@ namespace as1
             }
         case script::NativeFunctionCode::GetInputX:
 {
-                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState254().worldX));
+                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState().worldX));
                 return 0;
             }
         case script::NativeFunctionCode::GetInputY:
 {
-                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState254().worldY));
+                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState().worldY));
                 return 0;
             }
         case script::NativeFunctionCode::GetKey:
 {
-                const int value = static_cast<int>(scriptApplicationInputState254().lastCode);
+                const int value = static_cast<int>(scriptApplicationInputState().lastCode);
                 scriptPushIntegerRetail(value);
                 return 0;
             }
@@ -4704,7 +4697,7 @@ namespace as1
             }
         case script::NativeFunctionCode::GetInputState:
 {
-                const std::uint32_t state = scriptApplicationInputState254().flags;
+                const std::uint32_t state = scriptApplicationInputState().flags;
                 const int bitOrder[] = {15, 14, 9, 10, 8, 7, 12, 11, 6, 5, 2, 0};
                 int packed = 0;
                 for (int bit : bitOrder)
@@ -5182,7 +5175,7 @@ namespace as1
                     scriptPushIntegerRetail(vid->weaponBuildTime());
                     return 0;
                 case script::VidDataCode::Hide:
-                    scriptPushIntegerRetail(vid->hasPropertyBit400());
+                    scriptPushIntegerRetail(vid->isHidden());
                     return 0;
                 case script::VidDataCode::NotCreateAsChild:
                     scriptPushIntegerRetail(vid->notCreateAsChild());
@@ -5322,7 +5315,7 @@ namespace as1
                     vid->setWeaponBuildTime(value);
                     return 0;
                 case script::VidDataCode::Hide:
-                    vid->setLinkedPropertyBit400(value);
+                    vid->setLinkedHidden(value);
                     return 0;
                 case script::VidDataCode::NotCreateAsChild:
                     vid->setNotCreateAsChild(value);
@@ -5765,12 +5758,12 @@ namespace as1
             }
         case script::NativeFunctionCode::GetScreenInputX:
 {
-                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState254().clientX));
+                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState().clientX));
                 return 0;
             }
         case script::NativeFunctionCode::GetScreenInputY:
 {
-                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState254().clientY));
+                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState().clientY));
                 return 0;
             }
         case script::NativeFunctionCode::PlayerPathFlag:

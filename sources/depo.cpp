@@ -195,7 +195,7 @@ namespace as1
         const int bucket = armyIndex();
         PLAYER* const player = retailPlayerSlot(bucket);
         VID* const vid = mapOwner()->VidOrNull(nvid);
-        const int cost = vid->getWeaponValue24Scaled();
+        const int cost = vid->productionCost();
         if (static_cast<int>(player->money()) < cost)
             return static_cast<int>(m_queueCount);
 
@@ -232,7 +232,7 @@ namespace as1
         const std::uint32_t saved = m_queuedBuildTimes[slot];
         setActionTimer(saved != 0u
             ? saved
-            : GlobalBaseConstants()->raw[9] * static_cast<DWORD>(mapOwner()->VidOrNull(m_queuedNvids[slot])->getWeaponValue24Scaled()));
+            : GlobalBaseConstants()->raw[9] * static_cast<DWORD>(mapOwner()->VidOrNull(m_queuedNvids[slot])->productionCost()));
     }
 
     int DEPO::spawnNextDepoUnit(int, int) noexcept
@@ -333,7 +333,7 @@ namespace as1
         const std::size_t slot = static_cast<std::size_t>(index);
         VID* const vid = mapOwner()->VidOrNull(m_queuedNvids[slot]);
         PLAYER* const player = retailPlayerSlot(armyIndex());
-        player->setMoney(player->money() + static_cast<DWORD>(vid->getWeaponValue24Scaled()));
+        player->setMoney(player->money() + static_cast<DWORD>(vid->productionCost()));
 
         for (std::uint32_t i = static_cast<std::uint32_t>(index); i + 1u < m_queueCount; ++i)
         {
@@ -370,7 +370,7 @@ namespace as1
             index == static_cast<int>(m_activeQueueCursor) - 1
                 ? actionTimer()
                 : m_queuedBuildTimes[slot];
-        const std::uint32_t cost = static_cast<std::uint32_t>(vid->getWeaponValue24Scaled());
+        const std::uint32_t cost = static_cast<std::uint32_t>(vid->productionCost());
         return static_cast<int>((remaining * 0xFFu / cost) / GlobalBaseConstants()->raw[9]);
     }
 
@@ -425,13 +425,13 @@ namespace as1
         const std::size_t slot = static_cast<std::size_t>(index);
         PLAYER* const player = retailPlayerSlot(armyIndex());
         VID* const oldVid = mapOwner()->VidOrNull(m_queuedNvids[slot]);
-        player->setMoney(player->money() + static_cast<DWORD>(oldVid->getWeaponValue24Scaled()));
+        player->setMoney(player->money() + static_cast<DWORD>(oldVid->productionCost()));
 
         VID* const newVid = mapOwner()->VidOrNull(nvid);
-        player->setMoney(player->money() - static_cast<DWORD>(newVid->getWeaponValue24Scaled()));
+        player->setMoney(player->money() - static_cast<DWORD>(newVid->productionCost()));
         m_queuedNvids[slot] = static_cast<std::uint16_t>(nvid);
         m_queuedBuildTimes[slot] =
-            static_cast<std::uint32_t>(newVid->getWeaponValue24Scaled()) * GlobalBaseConstants()->raw[9];
+            static_cast<std::uint32_t>(newVid->productionCost()) * GlobalBaseConstants()->raw[9];
 
         if (m_activeQueueCursor != 1u)
         {

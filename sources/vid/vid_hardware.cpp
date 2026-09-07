@@ -132,7 +132,7 @@ namespace as1
             return static_cast<int>(static_cast<std::uint32_t>(converted));
         }
 
-        void deleteBaseTextureThroughRetailSlot00(BASE_TEXTURE* texture) noexcept
+        void deleteBaseTextureThroughVirtualDestructor(BASE_TEXTURE* texture) noexcept
         {
             if (!texture)
                 return;
@@ -216,7 +216,7 @@ namespace as1
                 {
                     BASE_TEXTURE* const texture =
                         m_texturePages[static_cast<std::int16_t>(m_texturePageCount)];
-                    deleteBaseTextureThroughRetailSlot00(texture);
+                    deleteBaseTextureThroughVirtualDestructor(texture);
                     --m_texturePageCount;
                 }
                 while (static_cast<std::int16_t>(m_texturePageCount) >= 0);

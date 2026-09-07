@@ -377,8 +377,8 @@ namespace as1
         int damageSfxId() const noexcept { return sfxForAnimation(7); }
 
         int calculateLinkedContribution() const noexcept;
-        int getWeaponValue24Scaled() const noexcept;
-        int setLinkedPropertyBit400(int enabled) noexcept;
+        int productionCost() const noexcept;
+        int setLinkedHidden(int enabled) noexcept;
         VID* fightChildVid() const noexcept { return childVid[8]; }
         VID* birthChildVid() const noexcept { return childVid[14]; }
         VID* deathChildVid() const noexcept { return childVid[15]; }
@@ -435,7 +435,7 @@ namespace as1
         int notCreateAsChild() const noexcept;
         int setNotCreateAsChild(int value) noexcept;
         int PropBirthAsSmoke() const noexcept;
-        int hasPropertyBit400() const noexcept;
+        int isHidden() const noexcept;
         int noChildValueForDataCode(int type) const noexcept;
         void setNoChildValueForDataCode(int type, int value) noexcept;
         int childNvidForDataCode(int type) const noexcept;
@@ -462,15 +462,15 @@ namespace as1
             DetectRange = 0x14,       // VID_DETECTRANGE
             BattleRange = 0x18,       // VID_BATTLERANGE
             Aim = 0x1C,               // VID_WEAPONAIM
-            Unknown20 = 0x20,
+            Reserved20 = 0x20,
             BuildTime = 0x24,         // VID_BUILDTIME
             AmmoCapacity = 0x28,      // VID_AMMO
             DefaultArmy = 0x2C,
             DefaultBehavior = 0x30,
-            Unknown34 = 0x34,
+            Reserved34 = 0x34,
             EnemyPriority = 0x38,
             MinimumRange = 0x3C,
-            Unknown40 = 0x40,
+            EffectRefreshInterval = 0x40,
         };
         int weaponIntAt(int offset) const noexcept;
         float weaponFloatAt(int offset) const noexcept;

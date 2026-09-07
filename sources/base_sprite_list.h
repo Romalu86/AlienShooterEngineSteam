@@ -31,7 +31,7 @@ namespace as1
         void clearSpriteReferences();
         void clear();
         void deleteAllSprites();
-        SPRITE* NextIterateNon0(int* cursor) const;
+        SPRITE* NextNonNull(int* cursor) const;
         SPRITE* beginReverseIteration(int* cursor) const noexcept;
         SPRITE* continueReverseIteration(int* cursor) const noexcept;
         void add(SPRITE* sprite);

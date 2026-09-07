@@ -585,10 +585,10 @@ namespace as1
     float VID::calculateMoveUpZ(float verticalDelta, float projectedXYLength) const noexcept
     {
 
-        const DWORD propertySlot14 = properties();
+        const DWORD propertyFlags = properties();
         float result = 0.0f;
 
-        if ((propertySlot14 & 0x00000002u) != 0)
+        if ((propertyFlags & 0x00000002u) != 0)
         {
             const BASE_CONSTANTS* const constants = GlobalBaseConstants();
             float c08 = 0.0f;
@@ -596,7 +596,7 @@ namespace as1
             result = projectedXYLength * c08 / maxSpeedValue() * 0.5f + verticalDelta * maxSpeedValue() / projectedXYLength;
             result *= (result > 0.0f) ? 1.1f : 0.89999998f;
         }
-        else if ((propertySlot14 & 0x00000004u) != 0)
+        else if ((propertyFlags & 0x00000004u) != 0)
         {
             const BASE_CONSTANTS* const constants = GlobalBaseConstants();
             float c0C = 0.0f;
@@ -604,7 +604,7 @@ namespace as1
             result = projectedXYLength * c0C / maxSpeedValue() * 0.5f + verticalDelta * maxSpeedValue() / projectedXYLength;
             result *= (result > 0.0f) ? 1.1f : 0.89999998f;
         }
-        else if ((propertySlot14 & 0x08000000u) != 0)
+        else if ((propertyFlags & 0x08000000u) != 0)
         {
             result = maximumZSpeed();
         }
@@ -881,7 +881,7 @@ namespace as1
         return static_cast<int>(properties() & P_BIRTHASSMOKE);
     }
 
-    int VID::hasPropertyBit400() const noexcept
+    int VID::isHidden() const noexcept
     {
         return static_cast<int>((vidRuntimeFlags >> 6u) & 1u);
     }
@@ -1075,7 +1075,7 @@ namespace as1
         return contribution;
     }
 
-    int VID::getWeaponValue24Scaled() const noexcept
+    int VID::productionCost() const noexcept
     {
 
         const VID* owner = this;
@@ -1091,7 +1091,7 @@ namespace as1
         return divideBy1000SignedMagic(value);
     }
 
-    int VID::setLinkedPropertyBit400(int enabled) noexcept
+    int VID::setLinkedHidden(int enabled) noexcept
     {
         constexpr unsigned int mask = 0x00000040u;
         const unsigned int bit = enabled != 0 ? mask : 0u;

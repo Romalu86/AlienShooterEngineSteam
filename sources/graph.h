@@ -341,7 +341,6 @@ namespace as1
         // MAP::startLoadMap calls GRAPH::LoadParameters before reading HEAD.
         // AS1 GRPH payload layout is kept readable here: environment, gamma pair, wind, optional sunlight.
         void LoadParameters(RESOURCE* map);
-        void chunk_LoadParameters(RESOURCE* map) { LoadParameters(map); }
 
         int SizeX() const { return static_cast<int>(m_sizeX); }
         int SizeY() const { return static_cast<int>(m_sizeY); }
@@ -363,10 +362,9 @@ namespace as1
         int getEffectState(int effect) const;
         int setEffect(int effect, int argument1, int argument2, int duration);
 
-        bool GraphFlag34Bit0() const { return (m_graphFlags & 0x00000001u) != 0; }
+        bool isModalRenderStateActive() const { return (m_graphFlags & 0x00000001u) != 0; }
 
-        bool GraphFlag34Bit1() const { return (m_graphFlags & 0x00000002u) != 0; }
-        bool GraphFlag34Bit7() const { return (m_graphFlags & 0x00000080u) != 0; }
+        bool uses32BitColorDepth() const { return (m_graphFlags & 0x00000002u) != 0; }
         bool fullscreenRequested() const noexcept;
 #if !defined(_MSC_VER) || !defined(_M_IX86)
         bool lastGammaRefreshChanged() const;

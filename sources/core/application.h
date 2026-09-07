@@ -197,7 +197,7 @@ namespace as1 { namespace core
         static constexpr std::uint32_t BucketStride = 0x10u;
 
 #ifndef _WIN32
-        std::uint32_t flagsSlot04 = 0;
+        std::uint32_t fallbackFlags = 0;
         float scrollMinX = 0.0f;
         float scrollMaxX = 0.0f;
         float scrollMinY = 0.0f;
@@ -238,7 +238,7 @@ namespace as1 { namespace core
     struct ApplicationFrameRuntimeState
     {
 #ifndef _WIN32
-        SPRITE* currentFrameSlot260 = nullptr;
+        SPRITE* currentFrameSpriteFallback = nullptr;
 #endif
         SPRITE* currentFrameSprite() const noexcept;
         void setCurrentFrameSprite(SPRITE* sprite) noexcept;
