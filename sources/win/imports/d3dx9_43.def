@@ -1,0 +1,4 @@
+LIBRARY d3dx9_43.dll
+EXPORTS
+    D3DXLoadSurfaceFromMemory
+    D3DXLoadSurfaceFromSurface

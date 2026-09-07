@@ -1,0 +1,648 @@
+﻿<?xml version='1.0' encoding='utf-8'?>
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" ToolsVersion="4.0">
+  <ItemGroup>
+    <Filter Include="sources\win\sound">
+      <UniqueIdentifier>{1E9BC925-A2F7-4C09-BA21-42394B885A2F}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources">
+      <UniqueIdentifier>{11111111-1111-1111-1111-111111111111}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\core">
+      <UniqueIdentifier>{22222222-2222-2222-2222-222222222222}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\graphics">
+      <UniqueIdentifier>{33333333-3333-3333-3333-333333333333}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\script">
+      <UniqueIdentifier>{44444444-4444-4444-4444-444444444444}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\input">
+      <UniqueIdentifier>{77777777-1111-4444-8888-106106106106}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\vid">
+      <UniqueIdentifier>{55555555-5555-5555-5555-555555555555}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\win">
+      <UniqueIdentifier>{66666666-6666-6666-6666-666666666666}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\game">
+      <UniqueIdentifier>{88888888-8888-8888-8888-888888888888}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\win\resources">
+      <UniqueIdentifier>{77777777-7777-7777-7777-777777777777}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\3rdparty">
+      <UniqueIdentifier>{66DF8A11-7AD3-4FAB-9528-8CBA4BD9D83B}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\3rdparty\win">
+      <UniqueIdentifier>{AA344708-86A5-448D-8D8D-D0989D744AFF}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\3rdparty\win\libogg">
+      <UniqueIdentifier>{FD731D0A-B94E-483E-AB7C-861537BE4156}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\3rdparty\win\libogg\include">
+      <UniqueIdentifier>{D93D00D9-F218-4774-ABC2-FCCF3E552728}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\3rdparty\win\libogg\src">
+      <UniqueIdentifier>{1E224D2E-9250-4E0D-AE21-43E1B4C46589}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\3rdparty\win\libvorbis">
+      <UniqueIdentifier>{64B4980D-C0CB-4DD5-AC2E-425712952C45}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\3rdparty\win\libvorbis\include">
+      <UniqueIdentifier>{338756BF-B575-4F14-AD5F-0896AD0FD24E}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\3rdparty\win\libvorbis\lib">
+      <UniqueIdentifier>{0927D9A2-FDFB-48A0-AB2B-0A4FA7C765DB}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\menu">
+      <UniqueIdentifier>{A1400000-0000-0000-0000-000000000140}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\images">
+      <UniqueIdentifier>{D6C0B17D-29B0-47F7-9A34-920242262165}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\ai">
+      <UniqueIdentifier>{66A28B41-5A65-4B1E-B572-A4D3C0B04224}</UniqueIdentifier>
+    </Filter>
+    <Filter Include="sources\sound">
+      <UniqueIdentifier>{7D41D6C8-21BF-4F28-9DC9-AD9F61E00221}</UniqueIdentifier>
+    </Filter>
+    <ClCompile Include="sources\registration_export.cpp" />
+    <ClCompile Include="sources\core\ini_resource_compiler.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <Filter Include="Symbols">
+      <UniqueIdentifier>{2F72D7BD-47F8-4D36-90DF-BB06B87CE4D8}</UniqueIdentifier>
+    </Filter>
+  </ItemGroup>
+  <ItemGroup>
+    <ClCompile Include="sources\win\main.cpp">
+      <Filter>sources\win</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\win\application_win.cpp">
+      <Filter>sources\win</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\as_string.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\application.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\crc32.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\msvc_array_helpers.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\base_stream.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\file_stream.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\resource.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\file_logger.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\configuration.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\profile.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\types.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\weak_controller.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\graphics\angle.cpp">
+      <Filter>sources\graphics</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\graphics\surface_transfer.cpp">
+      <Filter>sources\graphics</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\graphics\base_texture.cpp">
+      <Filter>sources\graphics</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\graphics\rectangle_vertexes.cpp">
+      <Filter>sources\graphics</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\graphics\gamma.cpp">
+      <Filter>sources\graphics</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\images\picture.cpp">
+      <Filter>sources\images</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\vid\vid.cpp">
+      <Filter>sources\vid</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\vid\vid_software.cpp">
+      <Filter>sources\vid</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\vid\vid_software_png.cpp">
+      <Filter>sources\vid</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\vid\vid_software16.cpp">
+      <Filter>sources\vid</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\vid\vid_hardware.cpp">
+      <Filter>sources\vid</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\vid\vid_hardware_z.cpp">
+      <Filter>sources\vid</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\vid\vid_light.cpp">
+      <Filter>sources\vid</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\vid\vid_font.cpp">
+      <Filter>sources\vid</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\vid\vid_surface.cpp">
+      <Filter>sources\vid</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\vid\vid_texcoor.cpp">
+      <Filter>sources\vid</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\map.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\constant.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\groups.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\player.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\base_sprite_list.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\unit.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\rail.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\building.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\depo.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\cannon.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\avia.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\creature.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\civ_robot.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\engine.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\balloon.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\mouse.cpp">
+      <Filter>Source Files</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\sprite.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\graph.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\input.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\script_exec.cpp">
+      <Filter>sources</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\script\lgc_script.cpp">
+      <Filter>sources\script</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\script\logic_runtime.cpp">
+      <Filter>sources\script</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\input\control_actions.cpp">
+      <Filter>sources\input</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\win\main_sw.cpp">
+      <Filter>sources\win</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\win\sound\sound_engine_p_win.cpp">
+      <Filter>sources\win\sound</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\win\dialog_item.cpp">
+      <Filter>sources\win</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libogg\src\bitwise.c">
+      <Filter>sources\3rdparty\win\libogg\src</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libogg\src\framing.c">
+      <Filter>sources\3rdparty\win\libogg\src</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\bitrate.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\block.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\codebook.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\envelope.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\floor0.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\floor1.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\info.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\lpc.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\lsp.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\mapping0.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\mdct.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\psy.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\res0.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\registry.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\smallft.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\synthesis.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\vorbisfile.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\window.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\3rdparty\win\libvorbis\lib\sharedbook.c">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\file_stream_p.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\profile_p.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\log.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\core\logger.cpp">
+      <Filter>sources\core</Filter>
+    </ClCompile>
+    <ClCompile Include="sources\menu.cpp">
+      <Filter>sources\menu</Filter>
+    </ClCompile>
+    <None Include="sources\menu_item.cpp">
+      <Filter>sources\menu</Filter>
+    </None>
+    <None Include="sources\menu\menu_actions_list.cpp">
+      <Filter>sources\menu</Filter>
+    </None>
+    <None Include="sources\menu\navigation_list.cpp">
+      <Filter>sources\menu</Filter>
+    </None>
+    <ClCompile Include="sources\sound\engine.cpp">
+      <Filter>sources\sound</Filter>
+    </ClCompile>
+  </ItemGroup>
+  <ItemGroup>
+    <ClInclude Include="sources\d3d8.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\game\startup.h">
+      <Filter>sources\game</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\as_string.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\application.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\crc32.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\msvc_array_helpers.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\retail_stack_abi.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\base_stream.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\file_stream.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\byte_stream.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\fourcc.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\resource.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\resource_filter.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\configuration.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\file_logger.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\types.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\weak_controller.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\graphics\angle.h">
+      <Filter>sources\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\graphics\gamma.h">
+      <Filter>sources\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\graphics\vector.h">
+      <Filter>sources\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\graphics\rect.h">
+      <Filter>sources\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\graphics\size.h">
+      <Filter>sources\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\graphics\rectangle_vertexes.h">
+      <Filter>sources\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\graphics\software_draw.h">
+      <Filter>sources\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\graphics\surface_transfer.h">
+      <Filter>sources\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\graphics\base_texture.h">
+      <Filter>sources\graphics</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\images\picture.h">
+      <Filter>sources\images</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\vid\vid.h">
+      <Filter>sources\vid</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\vid\vid_software.h">
+      <Filter>sources\vid</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\vid\vid_software_png.h">
+      <Filter>sources\vid</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\vid\vid_software16.h">
+      <Filter>sources\vid</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\vid\vid_hardware.h">
+      <Filter>sources\vid</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\vid\vid_hardware_z.h">
+      <Filter>sources\vid</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\vid\vid_light.h">
+      <Filter>sources\vid</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\vid\vid_font.h">
+      <Filter>sources\vid</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\vid\vid_surface.h">
+      <Filter>sources\vid</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\vid\vid_texcoor.h">
+      <Filter>sources\vid</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\mouse.h">
+      <Filter>Header Files</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\map.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\constant.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\groups.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\player.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\base_sprite_list.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\unit.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\rail.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\building.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\depo.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\cannon.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\avia.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\creature.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\civ_robot.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\engine.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\balloon.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\sprite.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\builded_terrain.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\sprite_act_const.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\graph.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\input.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\script_exec.h">
+      <Filter>sources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\script\action_constants.h">
+      <Filter>sources\script</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\script\lgc_script.h">
+      <Filter>sources\script</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\script\logic_runtime.h">
+      <Filter>sources\script</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\script\native_function_codes.h">
+      <Filter>sources\script</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\script\vid_data_codes.h">
+      <Filter>sources\script</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\input\control_actions.h">
+      <Filter>sources\input</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\win\resources\resource.h">
+      <Filter>sources\win\resources</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\win\application_win.h">
+      <Filter>sources\win</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\win\main_sw.h">
+      <Filter>sources\win</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\win\sound\sound_engine_p_win.h">
+      <Filter>sources\win\sound</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\win\dialog_item.h">
+      <Filter>sources\win</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libogg\include\ogg\ogg.h">
+      <Filter>sources\3rdparty\win\libogg\include</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\include\vorbis\codec.h">
+      <Filter>sources\3rdparty\win\libvorbis\include</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\include\vorbis\vorbisfile.h">
+      <Filter>sources\3rdparty\win\libvorbis\include</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\backends.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\bitrate.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\codebook.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\codec_internal.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\psy_retail_tables.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\envelope.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\highlevel.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\mdct.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\os.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\psy.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\scales.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\3rdparty\win\libvorbis\lib\smallft.h">
+      <Filter>sources\3rdparty\win\libvorbis\lib</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\file_stream_p.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\file_storage.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\profile.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\profile_p.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\log.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\logger.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\logger_p.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\menu.h">
+      <Filter>sources\menu</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\menu_item.h">
+      <Filter>sources\menu</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\menu_const.h">
+      <Filter>sources\menu</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\menu\menu_actions_list.h">
+      <Filter>sources\menu</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\menu\navigation_list.h">
+      <Filter>sources\menu</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\sound\engine.h">
+      <Filter>sources\sound</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\script\retail_byte_buffer.h">
+      <Filter>sources\script</Filter>
+    </ClInclude>
+    <ClInclude Include="sources\core\ini_resource_compiler.h">
+      <Filter>sources\core</Filter>
+    </ClInclude>
+  </ItemGroup>
+  <ItemGroup>
+    <None Include="sources\win\resources\AlienShooter_retail_exact.res">
+      <Filter>sources\win\resources</Filter>
+    </None>
+    <None Include="symbols\AlienShooter.pdb">
+      <Filter>Symbols</Filter>
+    </None>
+  </ItemGroup>
+</Project>
