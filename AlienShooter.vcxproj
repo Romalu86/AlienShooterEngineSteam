@@ -1,12 +1,20 @@
 ﻿<?xml version='1.0' encoding='utf-8'?>
 <Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
   <ItemGroup Label="ProjectConfigurations">
-    <ProjectConfiguration Include="Debug|Win32">
-      <Configuration>Debug</Configuration>
+    <ProjectConfiguration Include="Steam Debug|Win32">
+      <Configuration>Steam Debug</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
-    <ProjectConfiguration Include="Release|Win32">
-      <Configuration>Release</Configuration>
+    <ProjectConfiguration Include="Steam|Win32">
+      <Configuration>Steam</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Retail Debug|Win32">
+      <Configuration>Retail Debug</Configuration>
+      <Platform>Win32</Platform>
+    </ProjectConfiguration>
+    <ProjectConfiguration Include="Retail|Win32">
+      <Configuration>Retail</Configuration>
       <Platform>Win32</Platform>
     </ProjectConfiguration>
   </ItemGroup>
@@ -18,17 +26,18 @@
     <WindowsTargetPlatformVersion>10.0.19041.0</WindowsTargetPlatformVersion>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.Default.props" />
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'" Label="Configuration">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Steam Debug|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <TargetName>AlienShooter</TargetName>
     <UseDebugLibraries>true</UseDebugLibraries>
     <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
     <LinkIncremental>false</LinkIncremental>
-    <OutDir>$(ProjectDir)bin\$(Configuration)\$(Platform)\</OutDir>
-    <IntDir>$(ProjectDir).build\$(Configuration)\$(Platform)\</IntDir>
+    <OutDir>$(ProjectDir)bin\Steam\Debug\$(Platform)\</OutDir>
+    <IntDir>$(ProjectDir).build\Steam\Debug\$(Platform)\</IntDir>
   </PropertyGroup>
-  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'" Label="Configuration">
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Steam|Win32'" Label="Configuration">
     <ConfigurationType>Application</ConfigurationType>
     <TargetName>AlienShooter</TargetName>
     <UseDebugLibraries>false</UseDebugLibraries>
@@ -36,58 +45,150 @@
     <WholeProgramOptimization>false</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
     <LinkIncremental>false</LinkIncremental>
-    <OutDir>$(ProjectDir)bin\$(Configuration)\$(Platform)\</OutDir>
-    <IntDir>$(ProjectDir).build\$(Configuration)\$(Platform)\</IntDir>
+    <OutDir>$(ProjectDir)bin\Steam\$(Platform)\</OutDir>
+    <IntDir>$(ProjectDir).build\Steam\$(Platform)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Retail Debug|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <TargetName>AlienShooter</TargetName>
+    <UseDebugLibraries>true</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+    <LinkIncremental>false</LinkIncremental>
+    <OutDir>$(ProjectDir)bin\Retail\Debug\$(Platform)\</OutDir>
+    <IntDir>$(ProjectDir).build\Retail\Debug\$(Platform)\</IntDir>
+  </PropertyGroup>
+  <PropertyGroup Condition="'$(Configuration)|$(Platform)'=='Retail|Win32'" Label="Configuration">
+    <ConfigurationType>Application</ConfigurationType>
+    <TargetName>AlienShooter</TargetName>
+    <UseDebugLibraries>false</UseDebugLibraries>
+    <PlatformToolset>v143</PlatformToolset>
+    <WholeProgramOptimization>false</WholeProgramOptimization>
+    <CharacterSet>MultiByte</CharacterSet>
+    <LinkIncremental>false</LinkIncremental>
+    <OutDir>$(ProjectDir)bin\Retail\$(Platform)\</OutDir>
+    <IntDir>$(ProjectDir).build\Retail\$(Platform)\</IntDir>
   </PropertyGroup>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.props" />
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Steam Debug|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <FunctionLevelLinking>false</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;_DEBUG;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;_DEBUG;AS1_WITH_STEAM=1;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>sources\3rdparty\win\libvorbis\include;sources\3rdparty\win\libogg\include;sources;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <Optimization>Disabled</Optimization>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
       <ConformanceMode>true</ConformanceMode>
       <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)sources\win\resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-<Link>
+    <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateMapFile>false</GenerateMapFile>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
       <GenerateManifest>false</GenerateManifest>
       <EnableUAC>false</EnableUAC>
       <AdditionalOptions>/MANIFEST:NO %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(ProjectDir)sources\win\resources\AlienShooter_retail_exact.res;$(ProjectDir)sources\win\imports\d3dx9_43.lib;$(ProjectDir)sources\win\imports\steam_api.lib;d3d9.lib;user32.lib;shell32.lib;comdlg32.lib;dsound.lib;winmm.lib;ole32.lib;strmiids.lib;%(AdditionalDependencies)</AdditionalDependencies>
-      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <AdditionalDependencies>$(ProjectDir)sources\win\resources\AlienShooter_retail_exact.res;winmm.lib;d3d9.lib;$(IntDir)imports\d3dx9_43.lib;dsound.lib;kernel32.lib;user32.lib;gdi32.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;$(IntDir)imports\steam_api.lib;strmiids.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <OptimizeReferences>false</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
       <ProgramDatabaseFile>$(IntDir)AlienShooter.pdb</ProgramDatabaseFile>
       <UACExecutionLevel>AsInvoker</UACExecutionLevel>
       <ImportLibrary>$(IntDir)AlienShooter.lib</ImportLibrary>
     </Link>
   </ItemDefinitionGroup>
-  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Release|Win32'">
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Steam|Win32'">
     <ClCompile>
       <WarningLevel>Level3</WarningLevel>
       <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
       <FunctionLevelLinking>false</FunctionLevelLinking>
       <IntrinsicFunctions>true</IntrinsicFunctions>
       <SDLCheck>true</SDLCheck>
-      <PreprocessorDefinitions>WIN32;NDEBUG;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <PreprocessorDefinitions>WIN32;NDEBUG;AS1_WITH_STEAM=1;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>sources\3rdparty\win\libvorbis\include;sources\3rdparty\win\libogg\include;sources;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)sources\win\resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
-<Link>
+    <Link>
       <SubSystem>Windows</SubSystem>
       <GenerateMapFile>false</GenerateMapFile>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
       <GenerateManifest>false</GenerateManifest>
       <EnableUAC>false</EnableUAC>
       <AdditionalOptions>/MANIFEST:NO %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(ProjectDir)sources\win\resources\AlienShooter_retail_exact.res;winmm.lib;d3d9.lib;$(ProjectDir)sources\win\imports\d3dx9_43.lib;dsound.lib;kernel32.lib;user32.lib;gdi32.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;$(ProjectDir)sources\win\imports\steam_api.lib;strmiids.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(ProjectDir)sources\win\resources\AlienShooter_retail_exact.res;winmm.lib;d3d9.lib;$(IntDir)imports\d3dx9_43.lib;dsound.lib;kernel32.lib;user32.lib;gdi32.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;$(IntDir)imports\steam_api.lib;strmiids.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <EnableCOMDATFolding>true</EnableCOMDATFolding>
+      <OptimizeReferences>true</OptimizeReferences>
+      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(IntDir)AlienShooter.pdb</ProgramDatabaseFile>
+      <UACExecutionLevel>AsInvoker</UACExecutionLevel>
+      <ImportLibrary>$(IntDir)AlienShooter.lib</ImportLibrary>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Retail Debug|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <RuntimeLibrary>MultiThreadedDebug</RuntimeLibrary>
+      <FunctionLevelLinking>false</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;_DEBUG;AS1_WITH_STEAM=0;AS1_RETAIL_BUILD=1;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>sources\3rdparty\win\libvorbis\include;sources\3rdparty\win\libogg\include;sources;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+      <Optimization>Disabled</Optimization>
+      <DebugInformationFormat>ProgramDatabase</DebugInformationFormat>
+      <BasicRuntimeChecks>EnableFastChecks</BasicRuntimeChecks>
+      <ConformanceMode>true</ConformanceMode>
+      <LanguageStandard>stdcpp17</LanguageStandard>
+    </ClCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir)sources\win\resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateMapFile>false</GenerateMapFile>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+      <GenerateManifest>false</GenerateManifest>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalOptions>/MANIFEST:NO %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalDependencies>$(ProjectDir)sources\win\resources\AlienShooter_retail_exact.res;winmm.lib;d3d9.lib;$(IntDir)imports\d3dx9_43.lib;dsound.lib;kernel32.lib;user32.lib;gdi32.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;strmiids.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <EnableCOMDATFolding>false</EnableCOMDATFolding>
+      <OptimizeReferences>false</OptimizeReferences>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
+      <ProgramDatabaseFile>$(IntDir)AlienShooter.pdb</ProgramDatabaseFile>
+      <UACExecutionLevel>AsInvoker</UACExecutionLevel>
+      <ImportLibrary>$(IntDir)AlienShooter.lib</ImportLibrary>
+    </Link>
+  </ItemDefinitionGroup>
+  <ItemDefinitionGroup Condition="'$(Configuration)|$(Platform)'=='Retail|Win32'">
+    <ClCompile>
+      <WarningLevel>Level3</WarningLevel>
+      <RuntimeLibrary>MultiThreaded</RuntimeLibrary>
+      <FunctionLevelLinking>false</FunctionLevelLinking>
+      <IntrinsicFunctions>true</IntrinsicFunctions>
+      <SDLCheck>true</SDLCheck>
+      <PreprocessorDefinitions>WIN32;NDEBUG;AS1_WITH_STEAM=0;AS1_RETAIL_BUILD=1;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
+      <AdditionalIncludeDirectories>sources\3rdparty\win\libvorbis\include;sources\3rdparty\win\libogg\include;sources;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ClCompile>
+    <ResourceCompile>
+      <AdditionalIncludeDirectories>$(ProjectDir)sources\win\resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
+    </ResourceCompile>
+    <Link>
+      <SubSystem>Windows</SubSystem>
+      <GenerateMapFile>false</GenerateMapFile>
+      <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
+      <GenerateManifest>false</GenerateManifest>
+      <EnableUAC>false</EnableUAC>
+      <AdditionalOptions>/MANIFEST:NO %(AdditionalOptions)</AdditionalOptions>
+      <AdditionalDependencies>$(ProjectDir)sources\win\resources\AlienShooter_retail_exact.res;winmm.lib;d3d9.lib;$(IntDir)imports\d3dx9_43.lib;dsound.lib;kernel32.lib;user32.lib;gdi32.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;strmiids.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
       <GenerateDebugInformation>false</GenerateDebugInformation>
@@ -153,19 +254,9 @@
     <ClCompile Include="sources\graph.cpp" />
     <ClCompile Include="sources\input.cpp" />
     <ClCompile Include="sources\script_exec.cpp">
-      <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">MaxSpeed</Optimization>
-      <InlineFunctionExpansion Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AnySuitable</InlineFunctionExpansion>
-      <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Speed</FavorSizeOrSpeed>
-      <BasicRuntimeChecks Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Default</BasicRuntimeChecks>
-      <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</IntrinsicFunctions>
-    </ClCompile>
+      </ClCompile>
     <ClCompile Include="sources\script\lgc_script.cpp">
-      <Optimization Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">MaxSpeed</Optimization>
-      <InlineFunctionExpansion Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">AnySuitable</InlineFunctionExpansion>
-      <FavorSizeOrSpeed Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Speed</FavorSizeOrSpeed>
-      <BasicRuntimeChecks Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">Default</BasicRuntimeChecks>
-      <IntrinsicFunctions Condition="'$(Configuration)|$(Platform)'=='Debug|Win32'">true</IntrinsicFunctions>
-    </ClCompile>
+      </ClCompile>
     <ClCompile Include="sources\script\logic_runtime.cpp" />
     <ClCompile Include="sources\input\control_actions.cpp" />
     <ClCompile Include="sources\win\sound\sound_engine_p_win.cpp" />
@@ -360,6 +451,16 @@
     <None Include="sources\win\imports\d3dx9_43.def" />
     <None Include="sources\win\imports\steam_api.def" />
   </ItemGroup>
+  <Target Name="GenerateImportLibraries" BeforeTargets="Link">
+    <PropertyGroup>
+      <_AS1LibTool Condition="Exists('$(VCToolsInstallDir)bin\Hostx64\x86\lib.exe')">$(VCToolsInstallDir)bin\Hostx64\x86\lib.exe</_AS1LibTool>
+      <_AS1LibTool Condition="'$(_AS1LibTool)' == '' and Exists('$(VCToolsInstallDir)bin\Hostx86\x86\lib.exe')">$(VCToolsInstallDir)bin\Hostx86\x86\lib.exe</_AS1LibTool>
+    </PropertyGroup>
+    <Error Condition="'$(_AS1LibTool)' == ''" Text="MSVC lib.exe for x86 was not found. Install the MSVC C++ toolset for this project in Visual Studio Installer." />
+    <MakeDir Directories="$(IntDir)imports" />
+    <Exec Command="&quot;$(_AS1LibTool)&quot; /nologo /machine:x86 /def:&quot;$(ProjectDir)sources\win\imports\d3dx9_43.def&quot; /out:&quot;$(IntDir)imports\d3dx9_43.lib&quot;" />
+    <Exec Condition="'$(Configuration)' == 'Steam' Or '$(Configuration)' == 'Steam Debug'" Command="&quot;$(_AS1LibTool)&quot; /nologo /machine:x86 /def:&quot;$(ProjectDir)sources\win\imports\steam_api.def&quot; /out:&quot;$(IntDir)imports\steam_api.lib&quot;" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ItemGroup>
     <None Include="symbols\AlienShooter.pdb" />

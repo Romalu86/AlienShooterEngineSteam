@@ -3,6 +3,7 @@
 #include "core/as_string.h"
 #include "core/log.h"
 #include "core/file_logger.h"
+#include "core/application.h"
 
 #include <algorithm>
 #include <array>
@@ -10,6 +11,8 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <map>
+#include <string>
 
 #ifdef _WIN32
 #define WIN32_LEAN_AND_MEAN
@@ -19,6 +22,11 @@
 #include <windows.h>
 #endif
 
+#ifndef AS1_WITH_STEAM
+#define AS1_WITH_STEAM 1
+#endif
+
+#if AS1_WITH_STEAM
 namespace as1 { namespace steam
 {
     namespace
@@ -896,3 +904,438 @@ namespace as1 { namespace steam
 #endif
     }
 } }
+#else
+namespace as1 { namespace steam
+{
+    namespace
+    {
+        constexpr std::uint32_t kRetailStatsVersion = 2;
+        constexpr std::uint32_t kRetailStatsVersionLegacy = 1;
+        constexpr std::uint32_t kRetailMaximumRecords = 4096;
+        constexpr std::uint32_t kRetailMaximumIdBytes = 4096;
+        constexpr std::size_t kRetailMaximumDownloadedEntries = 64;
+        constexpr char kRetailStatsMagic[8] = {'A', 'S', '1', 'R', 'S', 'T', 'A', 'T'};
+
+        bool g_retailInitialized = false;
+        bool g_retailStatsDirty = false;
+        std::string g_retailStatsPath;
+        std::map<std::string, std::int32_t> g_retailStats;
+        std::map<std::string, bool> g_retailAchievements;
+        std::map<std::string, std::int32_t> g_retailLeaderboards;
+        std::map<std::string, bool> g_retailLeaderboardNames;
+        std::array<std::string, kRetailMaximumDownloadedEntries> g_retailDownloadedNames{};
+        std::array<int, kRetailMaximumDownloadedEntries> g_retailDownloadedScores{};
+        int g_retailDownloadedCount = 0;
+        int g_retailLastUploadRank = 0;
+
+        bool readExact(std::FILE* file, void* data, std::size_t size)
+        {
+            return file && (size == 0 || std::fread(data, 1, size, file) == size);
+        }
+
+        bool writeExact(std::FILE* file, const void* data, std::size_t size)
+        {
+            return file && (size == 0 || std::fwrite(data, 1, size, file) == size);
+        }
+
+        template <typename T>
+        bool readValue(std::FILE* file, T& value)
+        {
+            return readExact(file, &value, sizeof(value));
+        }
+
+        template <typename T>
+        bool writeValue(std::FILE* file, const T& value)
+        {
+            return writeExact(file, &value, sizeof(value));
+        }
+
+        bool readId(std::FILE* file, std::string& id)
+        {
+            std::uint32_t length = 0;
+            if (!readValue(file, length) || length == 0 || length > kRetailMaximumIdBytes)
+                return false;
+            id.resize(length);
+            return readExact(file, &id[0], length);
+        }
+
+        bool writeId(std::FILE* file, const std::string& id)
+        {
+            if (id.empty() || id.size() > kRetailMaximumIdBytes)
+                return false;
+            const std::uint32_t length = static_cast<std::uint32_t>(id.size());
+            return writeValue(file, length) && writeExact(file, id.data(), length);
+        }
+
+        std::string retailSaveDirectory()
+        {
+            const char* const configured = core::ApplicationSavePath().c_str();
+            std::string directory = (configured && *configured) ? configured : "Saves";
+            while (!directory.empty() && (directory.back() == '\\' || directory.back() == '/'))
+                directory.pop_back();
+            if (directory.empty())
+                directory = "Saves";
+#ifdef _WIN32
+            // This is the game's normal root save directory, not a new per-user folder.
+            (void)::CreateDirectoryA(directory.c_str(), nullptr);
+#endif
+            return directory;
+        }
+
+        std::string retailStatsPath()
+        {
+            std::string path = retailSaveDirectory();
+#ifdef _WIN32
+            path += "\\stats.dat";
+#else
+            path += "/stats.dat";
+#endif
+            return path;
+        }
+
+        void clearRetailDownloadedEntries() noexcept
+        {
+            for (auto& name : g_retailDownloadedNames)
+                name.clear();
+            g_retailDownloadedScores.fill(0);
+            g_retailDownloadedCount = 0;
+        }
+
+        void clearRetailState()
+        {
+            g_retailStats.clear();
+            g_retailAchievements.clear();
+            g_retailLeaderboards.clear();
+            g_retailLeaderboardNames.clear();
+            clearRetailDownloadedEntries();
+            g_retailLastUploadRank = 0;
+            g_retailStatsDirty = false;
+        }
+
+        bool loadRetailStats()
+        {
+            clearRetailState();
+            if (g_retailStatsPath.empty())
+                g_retailStatsPath = retailStatsPath();
+
+            std::FILE* const file = std::fopen(g_retailStatsPath.c_str(), "rb");
+            if (!file)
+                return true; // First launch is a valid empty state.
+
+            char magic[sizeof(kRetailStatsMagic)]{};
+            std::uint32_t version = 0;
+            std::uint32_t statCount = 0;
+            std::uint32_t achievementCount = 0;
+            std::uint32_t leaderboardCount = 0;
+            bool ok = readExact(file, magic, sizeof(magic)) &&
+                      std::memcmp(magic, kRetailStatsMagic, sizeof(magic)) == 0 &&
+                      readValue(file, version) &&
+                      (version == kRetailStatsVersionLegacy || version == kRetailStatsVersion) &&
+                      readValue(file, statCount) && statCount <= kRetailMaximumRecords &&
+                      readValue(file, achievementCount) && achievementCount <= kRetailMaximumRecords;
+
+            if (ok && version >= kRetailStatsVersion)
+                ok = readValue(file, leaderboardCount) && leaderboardCount <= kRetailMaximumRecords;
+
+            for (std::uint32_t i = 0; ok && i < statCount; ++i)
+            {
+                std::string id;
+                std::int32_t value = 0;
+                ok = readId(file, id) && readValue(file, value);
+                if (ok)
+                    g_retailStats[id] = value;
+            }
+
+            for (std::uint32_t i = 0; ok && i < achievementCount; ++i)
+            {
+                std::string id;
+                std::uint8_t unlocked = 0;
+                ok = readId(file, id) && readValue(file, unlocked);
+                if (ok)
+                    g_retailAchievements[id] = unlocked != 0;
+            }
+
+            for (std::uint32_t i = 0; ok && i < leaderboardCount; ++i)
+            {
+                std::string id;
+                std::int32_t score = 0;
+                ok = readId(file, id) && readValue(file, score);
+                if (ok)
+                    g_retailLeaderboards[id] = score;
+            }
+
+            std::fclose(file);
+            if (!ok)
+            {
+                clearRetailState();
+                if (g_fileLogger)
+                    writeLogLine(g_fileLogger, "!!!ERROR!!!RETAIL STORE: invalid stats file '%s'", g_retailStatsPath.c_str());
+                return false;
+            }
+            return true;
+        }
+
+        bool saveRetailStats()
+        {
+            if (g_retailStatsPath.empty())
+                g_retailStatsPath = retailStatsPath();
+
+            const std::string temporaryPath = g_retailStatsPath + ".tmp";
+            std::FILE* const file = std::fopen(temporaryPath.c_str(), "wb");
+            if (!file)
+            {
+                if (g_fileLogger)
+                    writeLogLine(g_fileLogger, "!!!ERROR!!!RETAIL STORE: can't write stats '%s'", temporaryPath.c_str());
+                return false;
+            }
+
+            const std::uint32_t version = kRetailStatsVersion;
+            const std::uint32_t statCount = static_cast<std::uint32_t>(g_retailStats.size());
+            const std::uint32_t achievementCount = static_cast<std::uint32_t>(g_retailAchievements.size());
+            const std::uint32_t leaderboardCount = static_cast<std::uint32_t>(g_retailLeaderboards.size());
+            bool ok = statCount <= kRetailMaximumRecords &&
+                      achievementCount <= kRetailMaximumRecords &&
+                      leaderboardCount <= kRetailMaximumRecords &&
+                      writeExact(file, kRetailStatsMagic, sizeof(kRetailStatsMagic)) &&
+                      writeValue(file, version) &&
+                      writeValue(file, statCount) &&
+                      writeValue(file, achievementCount) &&
+                      writeValue(file, leaderboardCount);
+
+            for (const auto& pair : g_retailStats)
+            {
+                if (!ok)
+                    break;
+                ok = writeId(file, pair.first) && writeValue(file, pair.second);
+            }
+
+            for (const auto& pair : g_retailAchievements)
+            {
+                if (!ok)
+                    break;
+                const std::uint8_t unlocked = pair.second ? 1u : 0u;
+                ok = writeId(file, pair.first) && writeValue(file, unlocked);
+            }
+
+            for (const auto& pair : g_retailLeaderboards)
+            {
+                if (!ok)
+                    break;
+                ok = writeId(file, pair.first) && writeValue(file, pair.second);
+            }
+
+            if (std::fflush(file) != 0)
+                ok = false;
+            if (std::fclose(file) != 0)
+                ok = false;
+
+            if (!ok)
+            {
+                std::remove(temporaryPath.c_str());
+                if (g_fileLogger)
+                    writeLogLine(g_fileLogger, "!!!ERROR!!!RETAIL STORE: failed to serialize stats");
+                return false;
+            }
+
+#ifdef _WIN32
+            if (!::MoveFileExA(temporaryPath.c_str(), g_retailStatsPath.c_str(),
+                               MOVEFILE_REPLACE_EXISTING | MOVEFILE_WRITE_THROUGH))
+            {
+                std::remove(temporaryPath.c_str());
+                if (g_fileLogger)
+                    writeLogLine(g_fileLogger, "!!!ERROR!!!RETAIL STORE: can't replace stats file (%lu)",
+                                 static_cast<unsigned long>(::GetLastError()));
+                return false;
+            }
+#else
+            std::remove(g_retailStatsPath.c_str());
+            if (std::rename(temporaryPath.c_str(), g_retailStatsPath.c_str()) != 0)
+            {
+                std::remove(temporaryPath.c_str());
+                return false;
+            }
+#endif
+
+            g_retailStatsDirty = false;
+            return true;
+        }
+
+        void registerRetailLeaderboards(const char* names)
+        {
+            if (!names)
+                names = "";
+            const char* segment = names;
+            for (const char* cursor = names;; ++cursor)
+            {
+                if (*cursor != '#' && *cursor != '\0')
+                    continue;
+                if (cursor != segment)
+                    g_retailLeaderboardNames[std::string(segment, static_cast<std::size_t>(cursor - segment))] = true;
+                if (*cursor == '\0')
+                    break;
+                segment = cursor + 1;
+            }
+        }
+
+        std::string retailPersonaName()
+        {
+#ifdef _WIN32
+            char name[256]{};
+            const DWORD size = ::GetEnvironmentVariableA("USERNAME", name, static_cast<DWORD>(sizeof(name)));
+            if (size > 0 && size < sizeof(name) && name[0] != '\0')
+                return std::string(name, size);
+#endif
+            return "Player";
+        }
+    }
+
+    bool Initialize(int appId)
+    {
+        (void)appId;
+        if (g_retailInitialized)
+            return true;
+
+        g_retailStatsPath = retailStatsPath();
+        const bool loaded = loadRetailStats();
+        g_retailInitialized = true;
+        if (g_fileLogger)
+            writeLogLine(g_fileLogger, "Retail offline store: %s (%s)",
+                         loaded ? "ready" : "started with empty state", g_retailStatsPath.c_str());
+        return true;
+    }
+
+    void Pump() {}
+
+    void Shutdown()
+    {
+        if (g_retailInitialized && g_retailStatsDirty)
+            (void)saveRetailStats();
+        g_retailInitialized = false;
+    }
+
+    bool Alive() noexcept { return g_retailInitialized; }
+
+    void SetAchievement(const char* id)
+    {
+        if (!id || !*id)
+            return;
+        g_retailAchievements[id] = true;
+        g_retailStatsDirty = true;
+    }
+
+    int GetAchievement(const char* id)
+    {
+        if (!id || !*id)
+            return 0;
+        const auto it = g_retailAchievements.find(id);
+        return (it != g_retailAchievements.end() && it->second) ? 1 : 0;
+    }
+
+    void ClearAchievement(const char* id)
+    {
+        if (!id || !*id)
+            return;
+        g_retailAchievements[id] = false;
+        g_retailStatsDirty = true;
+    }
+
+    void ResetAllStats()
+    {
+        g_retailStats.clear();
+        g_retailAchievements.clear();
+        g_retailLeaderboards.clear();
+        clearRetailDownloadedEntries();
+        g_retailLastUploadRank = 0;
+        g_retailStatsDirty = true;
+    }
+
+    void SetStat(const char* id, int value)
+    {
+        if (!id || !*id)
+            return;
+        g_retailStats[id] = static_cast<std::int32_t>(value);
+        g_retailStatsDirty = true;
+    }
+
+    int GetStat(const char* id)
+    {
+        if (!id || !*id)
+            return 0;
+        const auto it = g_retailStats.find(id);
+        return it != g_retailStats.end() ? static_cast<int>(it->second) : 0;
+    }
+
+    void SaveStatsIfNeeded()
+    {
+        if (g_retailInitialized && g_retailStatsDirty)
+            (void)saveRetailStats();
+    }
+
+    void ActivateStore(int appId) { (void)appId; }
+
+    void InitLeaderboards(const char* names)
+    {
+        registerRetailLeaderboards(names);
+        if (g_fileLogger)
+            writeLogLine(g_fileLogger, "Retail offline leaderboards initialized");
+    }
+
+    void UpdateLeaderboard(const char* name, int score)
+    {
+        if (!name || !*name)
+        {
+            g_retailLastUploadRank = -2;
+            return;
+        }
+
+        g_retailLeaderboardNames[name] = true;
+        // Steam call uses KeepBest (method 1), so the offline backend mirrors it.
+        auto it = g_retailLeaderboards.find(name);
+        if (it == g_retailLeaderboards.end() || score > it->second)
+            g_retailLeaderboards[name] = static_cast<std::int32_t>(score);
+        g_retailLastUploadRank = 1;
+        g_retailStatsDirty = true;
+    }
+
+    int DownloadLeaderboardEntries(const char* name, int count, int offset)
+    {
+        clearRetailDownloadedEntries();
+        if (!name || !*name || count <= 0)
+            return -2;
+
+        // Retail has no network ranking. Return the local player as a completed
+        // one-entry leaderboard instead of leaving Steam-oriented scripts waiting
+        // for an async callback that can never arrive.
+        if (offset > 0)
+            return 0;
+
+        g_retailLeaderboardNames[name] = true;
+        const auto it = g_retailLeaderboards.find(name);
+        const int score = it != g_retailLeaderboards.end() ? static_cast<int>(it->second) : 0;
+        g_retailDownloadedNames[0] = retailPersonaName();
+        g_retailDownloadedScores[0] = score;
+        g_retailDownloadedCount = 1;
+        return 1;
+    }
+
+    const char* LeaderboardEntryName(int index)
+    {
+        static const char empty[] = "";
+        if (index < 0 || index >= g_retailDownloadedCount ||
+            index >= static_cast<int>(kRetailMaximumDownloadedEntries))
+            return empty;
+        return g_retailDownloadedNames[static_cast<std::size_t>(index)].c_str();
+    }
+
+    int LeaderboardEntryScore(int index)
+    {
+        if (index < 0 || index >= g_retailDownloadedCount ||
+            index >= static_cast<int>(kRetailMaximumDownloadedEntries))
+            return 0;
+        return g_retailDownloadedScores[static_cast<std::size_t>(index)];
+    }
+
+    int LastUploadRank() noexcept { return g_retailLastUploadRank; }
+} }
+#endif
+

@@ -41,6 +41,10 @@
 #include "game/startup.h"
 #include "steam_store.h"
 
+#ifndef AS1_WITH_STEAM
+#define AS1_WITH_STEAM 1
+#endif
+
 namespace as1 { namespace win
 {
     namespace
@@ -548,6 +552,11 @@ namespace as1 { namespace win
 
         releaseShellOwnedSpriteOwner(this);
         deinitialize();
+#if !AS1_WITH_STEAM
+        // Persist offline stats even if a script exits without explicitly calling
+        // StoreSaveStatsIfNeeded(). Keep the Steam shutdown behavior untouched.
+        as1::steam::Shutdown();
+#endif
         destroyBaseApplicationState();
     }
 
@@ -680,6 +689,7 @@ namespace as1 { namespace win
         as1::core::initializePostComProfileOwners(windowConfig);
         setApplicationTitle(windowConfig.applicationTitle);
 
+#if AS1_WITH_STEAM
         if (windowConfig.steamAppId != -1 &&
             !as1::steam::Initialize(windowConfig.steamAppId))
         {
@@ -687,6 +697,19 @@ namespace as1 { namespace win
                 as1::writeLogLine(as1::g_fileLogger, "Can't init store %i", 1);
             return this;
         }
+#else
+        // Retail scripts still use the Steam-era numeric Store extern ABI.
+        // Bring up the offline backend unconditionally, even when a standalone
+        // cfg correctly omits the Steam= entry.
+        if (!as1::steam::Initialize(windowConfig.steamAppId != -1
+                                        ? windowConfig.steamAppId
+                                        : as1::steam::AppId))
+        {
+            if (as1::g_fileLogger)
+                as1::writeLogLine(as1::g_fileLogger, "Can't init retail store backend");
+            return this;
+        }
+#endif
 
 #if defined(_MSC_VER) && defined(_M_IX86)
                                                     

@@ -6,13 +6,19 @@ Project("{8BC9CEB8-8B4A-11D0-8D11-00A0C91BC942}") = "AlienShooter", "AlienShoote
 EndProject
 Global
 	GlobalSection(SolutionConfigurationPlatforms) = preSolution
-		Debug|Win32 = Debug|Win32
-		Release|Win32 = Release|Win32
+		Steam Debug|Win32 = Steam Debug|Win32
+		Steam|Win32 = Steam|Win32
+		Retail Debug|Win32 = Retail Debug|Win32
+		Retail|Win32 = Retail|Win32
 	EndGlobalSection
 	GlobalSection(ProjectConfigurationPlatforms) = postSolution
-		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Debug|Win32.ActiveCfg = Debug|Win32
-		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Debug|Win32.Build.0 = Debug|Win32
-		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Release|Win32.ActiveCfg = Release|Win32
-		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Release|Win32.Build.0 = Release|Win32
+		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Steam Debug|Win32.ActiveCfg = Steam Debug|Win32
+		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Steam Debug|Win32.Build.0 = Steam Debug|Win32
+		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Steam|Win32.ActiveCfg = Steam|Win32
+		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Steam|Win32.Build.0 = Steam|Win32
+		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Retail Debug|Win32.ActiveCfg = Retail Debug|Win32
+		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Retail Debug|Win32.Build.0 = Retail Debug|Win32
+		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Retail|Win32.ActiveCfg = Retail|Win32
+		{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}.Retail|Win32.Build.0 = Retail|Win32
 	EndGlobalSection
 EndGlobal
