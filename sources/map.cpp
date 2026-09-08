@@ -886,7 +886,10 @@ namespace as1
             (void)res->read(&nvid, sizeof(nvid));
 
             if (nvid >= static_cast<int>(core::ApplicationVidTable::kCapacity))
+            {
                 LOG::ResourceError("%s", 4, "nvid > MAX_VID", nvid, "");
+                continue;
+            }
 
             if (VID* const previous = appVidTable.slot(nvid))
             {
@@ -980,8 +983,11 @@ namespace as1
             if (res->read(&objectNvid, sizeof(objectNvid)) != 0)
                 throw std::runtime_error("MAP::reloadGameResourceParametersFromResource: failed to read nvid");
 
-            if (objectNvid >= 0x800)
+            if (objectNvid >= static_cast<int>(core::ApplicationVidTable::kCapacity))
+            {
                 LOG::ResourceError("%s", 4, "nvid > MAX_VID", objectNvid, "");
+                continue;
+            }
 
             VID* const slotVid = appVidTable.slot(objectNvid);
             if (!slotVid)
@@ -1088,6 +1094,11 @@ namespace as1
                 throw std::runtime_error("MAP::loadVids: failed to read nvid");
             if (nvid < 0)
                 throw std::runtime_error("MAP::loadVids: negative nvid");
+            if (nvid >= static_cast<int>(core::ApplicationVidTable::kCapacity))
+            {
+                LOG::ResourceError("%s", 4, "nvid > MAX_VID", nvid, "");
+                continue;
+            }
 
             VID* created = hostCreateVid(res, nvid);
             if (created)

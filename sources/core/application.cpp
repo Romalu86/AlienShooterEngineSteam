@@ -69,8 +69,8 @@ namespace as1 { namespace core
         int g_applicationWeaponCount = 0;
         WEAPON* g_applicationWeaponTable = nullptr;
         int g_applicationVidCount = 0;
-        std::array<VID*, ApplicationVidTable::kCapacity> g_applicationVidSlots{};
 #endif
+        std::array<VID*, ApplicationVidTable::kCapacity> g_applicationVidSlots{};
 #ifndef _WIN32
         SCRIPT g_applicationScriptOwner;
 #endif
@@ -233,6 +233,7 @@ namespace as1 { namespace core
         applicationPhysicalSlot<int>(owner, retail_application_layout::WeaponCount) = 0;
         applicationPhysicalSlot<WEAPON*>(owner, retail_application_layout::WeaponTable) = nullptr;
         applicationPhysicalSlot<int>(owner, retail_application_layout::VidCount) = 0;
+        g_applicationVidSlots.fill(nullptr);
 #else
         (void)owner;
         g_applicationTerrainGrid = nullptr;
@@ -415,6 +416,7 @@ namespace as1 { namespace core
             std::memset(static_cast<std::uint8_t*>(owner) + kFirstSlotOffset, 0,
                         kEndSlotOffset - kFirstSlotOffset);
         }
+        g_applicationVidSlots.fill(nullptr);
 #else
         g_applicationVidCount = 0;
         g_applicationVidSlots.fill(nullptr);
@@ -463,34 +465,26 @@ namespace as1 { namespace core
     {
         if (index < 0 || static_cast<std::size_t>(index) >= kCapacity)
             return nullptr;
-#ifdef _WIN32
-        void* const owner = ApplicationPhysicalOwner();
-        return owner ? applicationPhysicalSlot<VID*>(owner, kFirstSlotOffset + static_cast<std::size_t>(index) * 4u) : nullptr;
-#else
         return g_applicationVidSlots[static_cast<std::size_t>(index)];
-#endif
     }
 
     void ApplicationVidTable::setSlotCell(int index, VID* vid) noexcept
     {
         if (index < 0 || static_cast<std::size_t>(index) >= kCapacity)
             return;
-#ifdef _WIN32
-        if (void* const owner = ApplicationPhysicalOwner())
-            applicationPhysicalSlot<VID*>(owner, kFirstSlotOffset + static_cast<std::size_t>(index) * 4u) = vid;
-#else
         g_applicationVidSlots[static_cast<std::size_t>(index)] = vid;
+#ifdef _WIN32
+        if (static_cast<std::size_t>(index) < kRetailCapacity)
+        {
+            if (void* const owner = ApplicationPhysicalOwner())
+                applicationPhysicalSlot<VID*>(owner, kFirstSlotOffset + static_cast<std::size_t>(index) * 4u) = vid;
+        }
 #endif
     }
 
     VID* const* ApplicationVidTable::slotData() const noexcept
     {
-#ifdef _WIN32
-        void* const owner = ApplicationPhysicalOwner();
-        return owner ? reinterpret_cast<VID* const*>(static_cast<std::uint8_t*>(owner) + kFirstSlotOffset) : nullptr;
-#else
         return g_applicationVidSlots.data();
-#endif
     }
 
 #if !defined(_MSC_VER) || !defined(_M_IX86)
@@ -1231,13 +1225,15 @@ namespace as1 { namespace core
 
         ApplicationVidTable& vidTable = GlobalApplicationVidTable();
         VID* requestedVid = MAP::NullVid();
+        const bool extendedVidQuery = (filter & 0x00004000) != 0;
+        const bool vidQuery = extendedVidQuery || (filter & 0x00000800) != 0;
+        const int requestedNvid = extendedVidQuery ? (filter & 0x1FFF) : (filter & 0x7FF);
         int typeMask = 0;
-        if ((filter & 0x00000800) != 0)
+        if (vidQuery)
         {
-            const int nvid = filter & 0x7FF;
-            if (nvid < vidTable.count())
+            if (requestedNvid < vidTable.count())
             {
-                if (VID* const slot = vidTable.slot(nvid))
+                if (VID* const slot = vidTable.slot(requestedNvid))
                     requestedVid = slot;
             }
             if ((requestedVid->properties() & 0x40u) != 0u)
@@ -1276,9 +1272,9 @@ namespace as1 { namespace core
                 return false;
             if ((filter & static_cast<int>(0x80000000u)) != 0 && (candidate->runtimeFlags() & SPRITE::CommandBitsMask) != 0u)
                 return false;
-            if ((filter & 0x1000) != 0 && candidateVid->spriteClassId() != static_cast<DWORD>(filter & 0x7FF))
+            if (!extendedVidQuery && (filter & 0x1000) != 0 && candidateVid->spriteClassId() != static_cast<DWORD>(filter & 0x7FF))
                 return false;
-            if ((filter & 0x0800) != 0 && candidateVid->nvid() != (filter & 0x7FF))
+            if (vidQuery && candidateVid->nvid() != requestedNvid)
                 return false;
             return true;
         };
@@ -1344,7 +1340,7 @@ namespace as1 { namespace core
 
         if ((typeMask & 0x0C) == 0 || (typeMask & 0x673) != 0)
         {
-            if ((filter & 0x0800) != 0 && requestedVid->spriteClassId() == 10u)
+            if (vidQuery && requestedVid->spriteClassId() == 10u)
             {
                 SPRITE_LIST& frameList = applicationFrameSpriteList();
                 int index = static_cast<int>(frameList.count()) - 1;
@@ -1362,7 +1358,7 @@ namespace as1 { namespace core
 
             int firstPass = 0;
             int endPass = 13;
-            if ((filter & 0x0800) != 0)
+            if (vidQuery)
             {
                 firstPass = requestedVid->renderLayer();
                 endPass = firstPass + 1;
@@ -1429,13 +1425,15 @@ namespace as1 { namespace core
 
         ApplicationVidTable& vidTable = GlobalApplicationVidTable();
         VID* requestedVid = MAP::NullVid();
+        const bool extendedVidQuery = (filter & 0x00004000) != 0;
+        const bool vidQuery = extendedVidQuery || (filter & 0x00000800) != 0;
+        const int requestedNvid = extendedVidQuery ? (filter & 0x1FFF) : (filter & 0x7FF);
         int typeMask = 0;
-        if ((filter & 0x00000800) != 0)
+        if (vidQuery)
         {
-            const int nvid = filter & 0x7FF;
-            if (nvid < vidTable.count())
+            if (requestedNvid < vidTable.count())
             {
-                if (VID* const slot = vidTable.slot(nvid))
+                if (VID* const slot = vidTable.slot(requestedNvid))
                     requestedVid = slot;
             }
             if ((requestedVid->properties() & 0x40u) != 0u)
@@ -1466,9 +1464,9 @@ namespace as1 { namespace core
                 return false;
             if ((filter & static_cast<int>(0x80000000u)) != 0 && (candidate->runtimeFlags() & SPRITE::CommandBitsMask) != 0u)
                 return false;
-            if ((filter & 0x1000) != 0 && candidateVid->spriteClassId() != static_cast<DWORD>(filter & 0x7FF))
+            if (!extendedVidQuery && (filter & 0x1000) != 0 && candidateVid->spriteClassId() != static_cast<DWORD>(filter & 0x7FF))
                 return false;
-            if ((filter & 0x0800) != 0 && candidateVid->nvid() != (filter & 0x7FF))
+            if (vidQuery && candidateVid->nvid() != requestedNvid)
                 return false;
             return true;
         };
@@ -1527,7 +1525,7 @@ namespace as1 { namespace core
 
         if ((typeMask & 0x0C) == 0 || (typeMask & 0x673) != 0)
         {
-            if ((filter & 0x0800) != 0 && requestedVid->spriteClassId() == 10u)
+            if (vidQuery && requestedVid->spriteClassId() == 10u)
             {
                 SPRITE_LIST& frameList = applicationFrameSpriteList();
                 int index = static_cast<int>(frameList.count()) - 1;
@@ -1551,7 +1549,7 @@ namespace as1 { namespace core
 
             int firstPass = 0;
             int endPass = 13;
-            if ((filter & 0x0800) != 0)
+            if (vidQuery)
             {
                 firstPass = requestedVid->renderLayer();
                 endPass = firstPass + 1;

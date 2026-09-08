@@ -4025,16 +4025,11 @@ namespace as1
     {
         const int nvid = scriptPopIntegerRetail();
 #if defined(_WIN32)
-        auto* const owner = reinterpret_cast<std::uint8_t*>(this);
-        const int count = *reinterpret_cast<const int*>(
-            owner + core::retail_application_layout::VidCount);
+        const core::ApplicationVidTable& vidTable = core::GlobalApplicationVidTable();
         VID* vid = MAP::NullVid();
-        if (nvid >= 0 && nvid < count)
+        if (nvid >= 0 && nvid < vidTable.count())
         {
-            VID* const slot = *reinterpret_cast<VID**>(
-                owner + core::retail_application_layout::VidTable +
-                static_cast<std::size_t>(nvid) * sizeof(VID*));
-            if (slot)
+            if (VID* const slot = vidTable.slot(nvid))
                 vid = slot;
         }
 #else

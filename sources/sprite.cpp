@@ -10390,7 +10390,7 @@ namespace as1
                 SPRITE* const hit = core::Application::findSpriteAtPointByFilter(
                     *mapOwner(),
                     core::GlobalApplicationDrawDispatcherState(),
-                    spriteAdd32Wrap(argument1, 2048),
+                    core::EncodeVidQueryFilter(argument1),
                     spriteFildToF32(argument2),
                     spriteFildToF32(argument3));
                 if (hit)

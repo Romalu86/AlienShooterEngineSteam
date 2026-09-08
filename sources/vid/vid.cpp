@@ -1601,27 +1601,15 @@ namespace as1
     void VID::SetChildAndLink()
     {
 #if defined(_MSC_VER) && defined(_M_IX86)
-        std::uint8_t* const appOwner =
-            static_cast<std::uint8_t*>(core::ApplicationPhysicalOwner());
-
         const int linkedVidId = nLinkVid;
         if (linkedVidId)
         {
             VID* tableVid = nullptr;
             if (linkedVidId >= 0)
             {
-                const int vidCount =
-                    *reinterpret_cast<const int*>(
-                        appOwner + core::retail_application_layout::VidCount);
-                if (linkedVidId < vidCount)
-                {
-                    VID* const candidate =
-                        *reinterpret_cast<VID* const*>(
-                            appOwner + core::retail_application_layout::VidTable +
-                            static_cast<std::size_t>(linkedVidId) * sizeof(VID*));
-                    if (candidate)
-                        tableVid = candidate;
-                }
+                const core::ApplicationVidTable& vidTable = core::GlobalApplicationVidTable();
+                if (linkedVidId < vidTable.count())
+                    tableVid = vidTable.slot(linkedVidId);
             }
 
             if (tableVid)
@@ -1683,18 +1671,9 @@ namespace as1
             VID* tableVid = nullptr;
             if (childIndex >= 0)
             {
-                const int vidCount =
-                    *reinterpret_cast<const int*>(
-                        appOwner + core::retail_application_layout::VidCount);
-                if (childIndex < vidCount)
-                {
-                    VID* const candidate =
-                        *reinterpret_cast<VID* const*>(
-                            appOwner + core::retail_application_layout::VidTable +
-                            static_cast<std::size_t>(childIndex) * sizeof(VID*));
-                    if (candidate)
-                        tableVid = candidate;
-                }
+                const core::ApplicationVidTable& vidTable = core::GlobalApplicationVidTable();
+                if (childIndex < vidTable.count())
+                    tableVid = vidTable.slot(childIndex);
             }
 
             if (tableVid)

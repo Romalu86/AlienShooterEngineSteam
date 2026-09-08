@@ -137,7 +137,8 @@ namespace as1 { namespace core
     class ApplicationVidTable
     {
     public:
-        static constexpr std::size_t kCapacity = 0x800u;
+        static constexpr std::size_t kRetailCapacity = 0x800u;
+        static constexpr std::size_t kCapacity = 0x2000u;
         static constexpr std::uint32_t kCountOffset = retail_application_layout::VidCount;
         static constexpr std::uint32_t kFirstSlotOffset = retail_application_layout::VidTable;
         static constexpr std::uint32_t kEndSlotOffset = retail_application_layout::ShellOwnedSpriteVtable;
@@ -161,6 +162,13 @@ namespace as1 { namespace core
     };
 
     ApplicationVidTable& GlobalApplicationVidTable() noexcept;
+
+    constexpr int EncodeVidQueryFilter(int nvid) noexcept
+    {
+        return nvid < static_cast<int>(ApplicationVidTable::kRetailCapacity)
+            ? nvid + 0x0800
+            : 0x4000 | (nvid & 0x1FFF);
+    }
 
 
     struct ApplicationDrawPassBucket
