@@ -68,13 +68,13 @@ Offline Store data is saved as `stats.dat` inside the game's existing save direc
 
 The project keeps text `.def` files in `sources\win\imports` and automatically generates the required x86 import libraries into the configuration intermediate directory (`.build`) before linking. This avoids depending on legacy DirectX SDK `.lib` files being installed or checked into Git. The original Steam 1.22 Win32 resource payload is linked from `sources\win\resources\AlienShooter_retail_exact.res` in both configurations.
 
-The checked-in `symbols/AlienShooter.pdb` is a reference symbol file. Debug builds generate their own PDBs in the corresponding `.build` intermediate directories.
+Debug builds generate their own PDBs in the corresponding `.build` intermediate directories.
 
 For testing, place the selected `AlienShooter.exe` beside a legally obtained copy of the game data. The Steam executable additionally needs the Steam runtime; the Retail executable does not.
 
 ## Repository contents
 
-The repository contains source code, Visual Studio project files, the original Steam 1.22 Win32 resource payload, a reference `AlienShooter.pdb` in `symbols/`, and the third-party source components listed in `THIRD_PARTY_NOTICES.md`. Original game data, executables and Steam redistributable binaries are not included.
+The repository contains source code, Visual Studio project files, the original Steam 1.22 Win32 resource payload, and the third-party source components listed in `THIRD_PARTY_NOTICES.md`. Original game data, executables and Steam redistributable binaries are not included.
 
 ## License
 
