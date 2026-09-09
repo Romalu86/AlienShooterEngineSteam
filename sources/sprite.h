@@ -328,6 +328,11 @@ namespace as1
         float previousPathX = 0.0f;
         float previousPathY = 0.0f;
         float previousPathZ = 0.0f;
+
+        // Host-only high-FPS turn carry.  This lives outside the retail SPRITE
+        // layout and is used only when UNIT turning would quantize to zero.
+        float unitTurnSubstepCarry = 0.0f;
+        int unitTurnSubstepSign = 0;
     };
 
     class SPRITE
