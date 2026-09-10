@@ -4,12 +4,6 @@ A Win32/x86 source project focused on compatibility with the Steam 1.22 release 
 
 The repository is intended for preservation, maintenance, study and non-commercial modification. It does **not** include original game data or Steam redistributable binaries.
 
-## Current status
-
-- Target: **Alien Shooter Steam 1.22**.
-- Configuration: **Release | Win32**.
-- Toolset: **MSVC v141**.
-
 ## Requirements
 
 - Windows.
