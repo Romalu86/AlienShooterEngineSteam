@@ -1,6 +1,6 @@
 # Alien Shooter Steam 1.22 + Retail source project
 
-A Win32/x86 source project focused on compatibility with Alien Shooter Steam 1.22 while also providing a standalone Retail build. The current tree contains the cumulative engine, gameplay, rendering, resource-loading, save/profile and Steam compatibility work, plus the selected improvements ported from the `UpdatedBuild` branch.
+A Win32/x86 source project focused on compatibility with Alien Shooter Steam 1.22 while also providing a standalone Retail build. 
 
 The repository is intended for preservation, maintenance, study and non-commercial modification. It does **not** include original game data or Steam redistributable binaries.
 
