@@ -1,5 +1,5 @@
 ﻿<?xml version='1.0' encoding='utf-8'?>
-<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build">
+<Project xmlns="http://schemas.microsoft.com/developer/msbuild/2003" DefaultTargets="Build" ToolsVersion="15.0">
   <ItemGroup Label="ProjectConfigurations">
     <ProjectConfiguration Include="Debug|Win32">
       <Configuration>Debug</Configuration>
@@ -11,7 +11,7 @@
     </ProjectConfiguration>
   </ItemGroup>
   <PropertyGroup Label="Globals">
-    <VCProjectVersion>17.0</VCProjectVersion>
+    <VCProjectVersion>15.0</VCProjectVersion>
     <Keyword>Win32Proj</Keyword>
     <ProjectGuid>{8F9E8D3A-DA56-4F8B-9F2D-A1E5C38D9A11}</ProjectGuid>
     <RootNamespace>AlienShooter</RootNamespace>
@@ -22,7 +22,7 @@
     <ConfigurationType>Application</ConfigurationType>
     <TargetName>AlienShooter</TargetName>
     <UseDebugLibraries>true</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
     <CharacterSet>MultiByte</CharacterSet>
     <LinkIncremental>false</LinkIncremental>
     <OutDir>$(ProjectDir)bin\$(Configuration)\$(Platform)\</OutDir>
@@ -32,7 +32,7 @@
     <ConfigurationType>Application</ConfigurationType>
     <TargetName>AlienShooter</TargetName>
     <UseDebugLibraries>false</UseDebugLibraries>
-    <PlatformToolset>v143</PlatformToolset>
+    <PlatformToolset>v141</PlatformToolset>
     <WholeProgramOptimization>false</WholeProgramOptimization>
     <CharacterSet>MultiByte</CharacterSet>
     <LinkIncremental>false</LinkIncremental>
@@ -47,20 +47,19 @@
       <SDLCheck>true</SDLCheck>
       <PreprocessorDefinitions>WIN32;_DEBUG;_CRT_SECURE_NO_WARNINGS;%(PreprocessorDefinitions)</PreprocessorDefinitions>
       <AdditionalIncludeDirectories>sources\3rdparty\win\libvorbis\include;sources\3rdparty\win\libogg\include;sources;.;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
-      <ConformanceMode>true</ConformanceMode>
-      <LanguageStandard>stdcpp17</LanguageStandard>
     </ClCompile>
     <ResourceCompile>
       <AdditionalIncludeDirectories>$(ProjectDir)sources\win\resources;%(AdditionalIncludeDirectories)</AdditionalIncludeDirectories>
     </ResourceCompile>
 <Link>
       <SubSystem>Windows</SubSystem>
-      <GenerateMapFile>false</GenerateMapFile>
+      <GenerateMapFile>true</GenerateMapFile>
+      <MapFileName>$(OutDir)$(TargetName).map</MapFileName>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
       <GenerateManifest>false</GenerateManifest>
       <EnableUAC>false</EnableUAC>
       <AdditionalOptions>/MANIFEST:NO %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(ProjectDir)sources\win\resources\AlienShooter_retail_exact.res;$(ProjectDir)sources\win\imports\d3dx9_43.lib;$(ProjectDir)sources\win\imports\steam_api.lib;d3d9.lib;user32.lib;shell32.lib;comdlg32.lib;dsound.lib;winmm.lib;ole32.lib;strmiids.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(ProjectDir)sources\win\resources\AlienShooter_retail_exact.res;$(IntDir)d3dx9_43.lib;$(IntDir)steam_api.lib;d3d9.lib;user32.lib;shell32.lib;comdlg32.lib;dsound.lib;winmm.lib;ole32.lib;strmiids.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <GenerateDebugInformation>false</GenerateDebugInformation>
       <ProgramDatabaseFile>$(IntDir)AlienShooter.pdb</ProgramDatabaseFile>
       <UACExecutionLevel>AsInvoker</UACExecutionLevel>
@@ -82,15 +81,16 @@
     </ResourceCompile>
 <Link>
       <SubSystem>Windows</SubSystem>
-      <GenerateMapFile>false</GenerateMapFile>
+      <GenerateMapFile>true</GenerateMapFile>
+      <MapFileName>$(OutDir)$(TargetName).map</MapFileName>
       <ImageHasSafeExceptionHandlers>false</ImageHasSafeExceptionHandlers>
       <GenerateManifest>false</GenerateManifest>
       <EnableUAC>false</EnableUAC>
       <AdditionalOptions>/MANIFEST:NO %(AdditionalOptions)</AdditionalOptions>
-      <AdditionalDependencies>$(ProjectDir)sources\win\resources\AlienShooter_retail_exact.res;winmm.lib;d3d9.lib;$(ProjectDir)sources\win\imports\d3dx9_43.lib;dsound.lib;kernel32.lib;user32.lib;gdi32.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;$(ProjectDir)sources\win\imports\steam_api.lib;strmiids.lib;%(AdditionalDependencies)</AdditionalDependencies>
+      <AdditionalDependencies>$(ProjectDir)sources\win\resources\AlienShooter_retail_exact.res;winmm.lib;d3d9.lib;$(IntDir)d3dx9_43.lib;dsound.lib;kernel32.lib;user32.lib;gdi32.lib;comdlg32.lib;advapi32.lib;shell32.lib;ole32.lib;$(IntDir)steam_api.lib;strmiids.lib;%(AdditionalDependencies)</AdditionalDependencies>
       <EnableCOMDATFolding>true</EnableCOMDATFolding>
       <OptimizeReferences>true</OptimizeReferences>
-      <GenerateDebugInformation>false</GenerateDebugInformation>
+      <GenerateDebugInformation>true</GenerateDebugInformation>
       <ProgramDatabaseFile>$(IntDir)AlienShooter.pdb</ProgramDatabaseFile>
       <UACExecutionLevel>AsInvoker</UACExecutionLevel>
       <ImportLibrary>$(IntDir)AlienShooter.lib</ImportLibrary>
@@ -360,6 +360,15 @@
     <None Include="sources\win\imports\d3dx9_43.def" />
     <None Include="sources\win\imports\steam_api.def" />
   </ItemGroup>
+  <Target Name="GenerateWin32ImportLibraries" BeforeTargets="Link" Condition="'$(Platform)'=='Win32'">
+    <MakeDir Directories="$(IntDir)" />
+    <PropertyGroup>
+      <ImportLibraryTool>$(VCToolsInstallDir)bin\HostX86\x86\lib.exe</ImportLibraryTool>
+    </PropertyGroup>
+    <Error Condition="!Exists('$(ImportLibraryTool)')" Text="Required MSVC v141 x86 lib.exe was not found at $(ImportLibraryTool). Install the MSVC v141 C++ x86/x64 build tools, or install Visual Studio 2017 RTM side-by-side for the original 14.10 compiler." />
+    <Exec Command="&quot;$(ImportLibraryTool)&quot; /nologo /machine:X86 /def:&quot;$(ProjectDir)sources\win\imports\d3dx9_43.def&quot; /out:&quot;$(IntDir)d3dx9_43.lib&quot;" />
+    <Exec Command="&quot;$(ImportLibraryTool)&quot; /nologo /machine:X86 /def:&quot;$(ProjectDir)sources\win\imports\steam_api.def&quot; /out:&quot;$(IntDir)steam_api.lib&quot;" />
+  </Target>
   <Import Project="$(VCTargetsPath)\Microsoft.Cpp.targets" />
   <ItemGroup>
     <None Include="symbols\AlienShooter.pdb" />
