@@ -1,88 +1,105 @@
 # Alien Shooter Steam 1.22 + Retail source project
 
-Windows source project for Alien Shooter Steam 1.22, intended for preservation, study, maintenance and non-commercial modification.
+A Win32/x86 source project focused on compatibility with Alien Shooter Steam 1.22 while also providing a standalone Retail build. The current tree contains the cumulative engine, gameplay, rendering, resource-loading, save/profile and Steam compatibility work, plus the selected improvements ported from the `UpdatedBuild` branch.
 
-The repository contains Steam and Retail targets in the same Visual Studio project, each with Release and Debug variants:
+The repository is intended for preservation, maintenance, study and non-commercial modification. It does **not** include original game data or Steam redistributable binaries.
 
-- **Steam | Win32** — Steam release build.
-- **Steam Debug | Win32** — Steam debug build with debug CRT and PDB generation.
-- **Retail | Win32** — off-Steam release build.
-- **Retail Debug | Win32** — off-Steam debug build with debug CRT and PDB generation.
+## Current status
 
-The Release configurations keep the short names **Steam** and **Retail** in Visual Studio.
+- Compatibility baseline: **Alien Shooter Steam 1.22**.
+- Toolset: **MSVC v141**, Win32/x86.
+- Visual Studio configurations:
+  - **Steam | Win32** — release build with Steamworks support.
+  - **Steam Debug | Win32** — debug build with Steamworks support.
+  - **Retail | Win32** — release build without Steamworks.
+  - **Retail Debug | Win32** — debug build without Steamworks.
+- The pre-feature Steam compatibility baseline was runtime-tested after pass 19 with no new regressions observed.
+- The current source additionally includes the NVID expansion, high-FPS UNIT/pathfinding correction and Retail/offline Store backend described below.
+- Compiler/runtime layout can differ from the historical executable when a later v141 compiler is used. Functional compatibility is the goal; byte-for-byte executable identity is not required.
 
-No source files need to be swapped when changing between Steam and Retail.
+## Added branch features
 
-# Features of this branch
-1. Fixed a bug with pathfinding in UNIT; it is now independent of FPS.
-2. Added the ability to build the game without Steamworks, with support for offline statistics.
-3. Increased the NVid limit to 8192. The previous limit was 2048.
+### NVID limit: 8192
 
-This branch will be updated as needed in the future.
+The engine-side VID table now supports **8192** entries instead of the legacy **2048** limit.
+
+- The original 2048-entry application layout is preserved for compatibility.
+- A host-side table stores the complete 8192-entry range.
+- Legacy NVID query encoding is preserved below 2048.
+- An extended query encoding is used for NVID values from 2048 through 8191.
+- Resource-loading paths reject out-of-range NVID values instead of indexing beyond the table.
+- Child/link VID lookup and script-side VID lookup use the expanded table consistently.
+
+### High-FPS UNIT/pathfinding fix
+
+UNIT turning no longer stalls when a very small frame delta makes the integer angular step round to zero.
+
+- Normal frame rates continue through the existing rotation path.
+- Only zero-quantized high-FPS turns accumulate fractional angular progress.
+- Accumulated progress is converted into the smallest valid rotation step when enough progress has built up.
+- The fix is stored outside the original sprite memory layout and does not change serialized game data.
+
+### Retail build without Steamworks
+
+The `Retail` configurations compile with `AS1_WITH_STEAM=0` and do not link or require `steam_api.dll`.
+
+The Retail Store backend keeps the existing script-facing Store API usable offline:
+
+- integer statistics can be set, queried and persisted;
+- achievements can be set, queried, cleared and reset;
+- offline data is stored as `stats.dat` in the game's configured save directory, normally `Saves`;
+- leaderboard calls complete synchronously through a local one-player leaderboard so Steam-oriented scripts do not wait for callbacks that cannot arrive;
+- leaderboard score updates use keep-best behavior;
+- the player name is taken from the Windows `USERNAME` environment variable, with `Player` as fallback;
+- Steam overlay/store activation is a safe no-op in Retail mode.
+
+The `Steam` configurations continue to use the Steam backend and `steam_api.dll`.
 
 ## Requirements
 
-- Windows
-- Visual Studio 2022 or newer (including Visual Studio 2026) with **Desktop development with C++** and the MSVC v143 x86 toolset
-- Win32/x86 toolchain
-- A legally obtained Alien Shooter installation/game data for runtime content
-- Legacy DirectX runtime providing `d3dx9_43.dll`
-- For the **Steam** build only: `steam_api.dll` from the legally obtained Steam installation
+- Windows.
+- Visual Studio 2022/2026 with **MSVC v141 - VS 2017 C++ x64/x86 build tools**, or Visual Studio 2017 / Build Tools 2017.
+- Win32/x86 build support.
+- A legally obtained Alien Shooter installation for runtime game data.
+- Legacy DirectX runtime providing `d3dx9_43.dll`.
+- For Steam builds only: `steam_api.dll` from a legally obtained Steam installation.
 
-## Building in Visual Studio
+## Build
 
-1. Open `AlienShooter.sln`.
-2. Select one of the four Win32 configurations:
-   - `Steam | Win32`
-   - `Steam Debug | Win32`
-   - `Retail | Win32`
-   - `Retail Debug | Win32`
-3. Build the `AlienShooter` project.
+1. Install the **Desktop development with C++** workload.
+2. Install **MSVC v141 - VS 2017 C++ x64/x86 build tools** when using Visual Studio 2022/2026.
+3. Open `AlienShooter.sln`.
+4. Select one of the four Win32 configurations.
+5. Build the `AlienShooter` project.
 
-On Visual Studio 2026, keep the project on the **v143** toolset unless intentionally retargeting the engine. The build now creates `d3dx9_43.lib` (and `steam_api.lib` for Steam builds) automatically from the checked-in `.def` files. The runtime DLLs are still required when running the executable.
+The project intentionally requests `PlatformToolset=v141` without hard-coding a specific `VCToolsVersion`. This lets modern Visual Studio installations use the v141 toolset that is actually installed instead of failing when an unavailable historical compiler folder is requested.
 
-Outputs:
+Required x86 import libraries are generated from the checked-in `.def` files into the configuration's intermediate directory:
 
-- Steam: `bin\Steam\Win32\AlienShooter.exe`
-- Steam Debug: `bin\Steam\Debug\Win32\AlienShooter.exe`
-- Retail: `bin\Retail\Win32\AlienShooter.exe`
-- Retail Debug: `bin\Retail\Debug\Win32\AlienShooter.exe`
+- `d3dx9_43.lib` is generated for all builds;
+- `steam_api.lib` is generated only for Steam builds.
 
-## Steam build
+The generator accepts either the Hostx64/x86 or Hostx86/x86 MSVC `lib.exe`, which keeps the project usable across modern Visual Studio installations without checking proprietary import-library binaries into the source tree.
 
-The `Steam` and `Steam Debug` configurations compile with `AS1_WITH_STEAM=1`. The x86 `steam_api.lib` import library is generated automatically from `sources\win\imports\steam_api.def` at build time, so no checked-in binary `.lib` is required. At runtime it uses the original Steam Store path for statistics, achievements, leaderboards and the player's Steam persona name.
+### Output directories
 
-The Steam executable requires the Steam runtime/`steam_api.dll` beside the legally obtained game data, matching the normal Steam installation.
+- Steam: `bin\Steam\Win32\`
+- Steam Debug: `bin\Steam\Debug\Win32\`
+- Retail: `bin\Retail\Win32\`
+- Retail Debug: `bin\Retail\Debug\Win32\`
 
-## Retail build
+Builds emit `AlienShooter.exe`; the current project settings also emit PDB and MAP diagnostics.
 
-The `Retail` and `Retail Debug` configurations compile with `AS1_WITH_STEAM=0` and `AS1_RETAIL_BUILD=1`. They do not link `steam_api.lib` and does not import or require `steam_api.dll`.
-
-Retail preserves the Steam-era numeric Store extern ABI used by the game scripts, but services it locally:
-
-- `SetStat` / `GetStat` work offline.
-- Achievements can be set, queried, cleared and reset offline.
-- Statistics and achievements persist between runs.
-- Steam-era leaderboard calls complete synchronously through a local one-player leaderboard so scripts never wait for Steam callbacks that cannot arrive.
-- The Retail player name is taken from the Windows `USERNAME` environment variable, with `Player` as a fallback.
-- Steam overlay/store activation is a safe no-op in Retail.
-
-The Retail Store backend is initialized even when the game configuration does not contain a `Steam=` entry. If an existing configuration still contains `Steam=33100`, the Retail executable also continues normally without loading Steam API.
-
-Offline Store data is saved as `stats.dat` inside the game's existing save directory (`Saves` in the normal installation). The engine uses its configured application save path when available and falls back to the root `Saves` directory. No `%LOCALAPPDATA%` folder or additional save hierarchy is created.
-
-## Project/runtime details
-
-The project keeps text `.def` files in `sources\win\imports` and automatically generates the required x86 import libraries into the configuration intermediate directory (`.build`) before linking. This avoids depending on legacy DirectX SDK `.lib` files being installed or checked into Git. The original Steam 1.22 Win32 resource payload is linked from `sources\win\resources\AlienShooter_retail_exact.res` in both configurations.
-
-Debug builds generate their own PDBs in the corresponding `.build` intermediate directories.
-
-For testing, place the selected `AlienShooter.exe` beside a legally obtained copy of the game data. The Steam executable additionally needs the Steam runtime; the Retail executable does not.
+For runtime testing, place the built executable beside a legally obtained copy of the game data. Steam builds additionally require the Steam runtime; Retail builds do not.
 
 ## Repository contents
 
-The repository contains source code, Visual Studio project files, the original Steam 1.22 Win32 resource payload, and the third-party source components listed in `THIRD_PARTY_NOTICES.md`. Original game data, executables and Steam redistributable binaries are not included.
+The project contains source code, Visual Studio project files, the required Win32 resource payload and third-party source components listed in `THIRD_PARTY_NOTICES.md`.
+
+Original game data, original executables and Steam redistributable binaries are not part of the source release.
 
 ## License
 
-This project is available for **non-commercial use only** under [LICENSE.md](LICENSE.md). Third-party components remain under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Game content is not licensed by this repository; see [GAME_CONTENT_NOTICE.md](GAME_CONTENT_NOTICE.md).
+This project is available for **non-commercial use only** under [LICENSE.md](LICENSE.md).
+
+Third-party components remain under their own licenses; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). Game content is not licensed by this repository; see [GAME_CONTENT_NOTICE.md](GAME_CONTENT_NOTICE.md).
