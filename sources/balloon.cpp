@@ -60,38 +60,28 @@ namespace as1
             return child && child->Vid() == target->Vid()->linkedVid();
         }
 
-        bool balloonX87LessOrUnordered(long double lhs, long double rhs) noexcept
+        bool balloonLessOrUnordered(long double lhs, long double rhs) noexcept
         {
             return std::isnan(lhs) || std::isnan(rhs) || lhs < rhs;
         }
 
-        bool balloonX87EqualOrUnordered(long double lhs, long double rhs) noexcept
+        bool balloonEqualOrUnordered(long double lhs, long double rhs) noexcept
         {
 
             return std::isnan(lhs) || std::isnan(rhs) || lhs == rhs;
         }
 
-        bool balloonX87LessEqualOrUnordered(long double lhs, long double rhs) noexcept
+        bool balloonLessOrUnordered(double lhs, double rhs) noexcept
         {
-            return std::isnan(lhs) || std::isnan(rhs) || lhs <= rhs;
+            return balloonLessOrUnordered(static_cast<long double>(lhs), static_cast<long double>(rhs));
         }
 
-        bool balloonX87LessOrUnordered(double lhs, double rhs) noexcept
+        bool balloonEqualOrUnordered(double lhs, double rhs) noexcept
         {
-            return balloonX87LessOrUnordered(static_cast<long double>(lhs), static_cast<long double>(rhs));
+            return balloonEqualOrUnordered(static_cast<long double>(lhs), static_cast<long double>(rhs));
         }
 
-        bool balloonX87EqualOrUnordered(double lhs, double rhs) noexcept
-        {
-            return balloonX87EqualOrUnordered(static_cast<long double>(lhs), static_cast<long double>(rhs));
-        }
-
-        bool balloonX87LessEqualOrUnordered(double lhs, double rhs) noexcept
-        {
-            return balloonX87LessEqualOrUnordered(static_cast<long double>(lhs), static_cast<long double>(rhs));
-        }
-
-        bool balloonUcomissNotEqualOrUnordered(double lhs, double rhs) noexcept
+        bool balloonNotEqualOrUnordered(double lhs, double rhs) noexcept
         {
             return std::isnan(lhs) || std::isnan(rhs) || lhs != rhs;
         }
@@ -101,13 +91,13 @@ namespace as1
             return !std::isnan(lhs) && !std::isnan(rhs) && lhs >= rhs;
         }
 
-        double balloonTargetDistance(const BALLOON* self, const SPRITE* candidate) noexcept
+        float balloonTargetDistance(const BALLOON* self, const SPRITE* candidate) noexcept
         {
-            const double dx = std::fabs(static_cast<double>(candidate->X()) - static_cast<double>(self->X()));
-            const double dy = std::fabs(static_cast<double>(candidate->Y()) - static_cast<double>(self->Y()));
-            return (std::isnan(dx) || std::isnan(dy) || dx <= dy)
-                ? dx * 0.5 + dy
-                : dx + dy * 0.5;
+            // The game logic performs both coordinate subtractions, fabs and
+            // the 0.5 weighted metric in binary32 (single-precision subtraction/single-precision multiplication/single-precision addition).
+            const float dx = std::fabs(candidate->X() - self->X());
+            const float dy = std::fabs(candidate->Y() - self->Y());
+            return !(dx > dy) ? dx * 0.5f + dy : dx + dy * 0.5f;
         }
     }
 
@@ -134,11 +124,11 @@ namespace as1
                 }
                 else
                 {
-                    const double candidateDistance = balloonTargetDistance(this, candidate);
-                    const double bestDistance = balloonTargetDistance(this, best);
-                    // Final `test ah,1` accepts less-than and unordered.
-                    if (std::isnan(candidateDistance) || std::isnan(bestDistance) ||
-                        candidateDistance < bestDistance)
+                    const float candidateDistance = balloonTargetDistance(this, candidate);
+                    const float bestDistance = balloonTargetDistance(this, best);
+                    // The game logic uses floating-point comparison best,candidate / ordered comparison skip:
+                    // replacement happens only for ordered candidate < best.
+                    if (candidateDistance < bestDistance)
                         best = candidate;
                 }
             }
@@ -232,7 +222,7 @@ namespace as1
                 ChangeCoor(target->X(), target->Y(), Z());
                 const std::uint32_t delta = std::max(
                     core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds(),
-                    static_cast<std::uint32_t>(vid->defaultFrameSpeed()));
+                    static_cast<std::uint32_t>(vid->hostFrameSpeedStorage(currentAnimation())));
                 RotateTact(target->directionIndex(), delta);
                 if (target->Z() + target->Vid()->linkOffset().z >= Z())
                     attachToGoalTarget();
@@ -249,9 +239,9 @@ namespace as1
         const float center = ground + vid->moveUpZ();
         if (center - 10.0f > Z())
             setZSpeedDirect(vid->maximumZSpeed());
-        else if (balloonX87LessEqualOrUnordered(
-                     static_cast<double>(Z()),
-                     static_cast<double>(center + 10.0f)))
+        // The game logic uses ordered floating-point comparison semantics here: unordered/NaN
+        // does not satisfy the <= branch and therefore falls through to descent.
+        else if (Z() <= center + 10.0f)
             setZSpeedDirect(0.0f);
         else
             setZSpeedDirect(-vid->maximumZSpeed());
@@ -263,11 +253,11 @@ namespace as1
         SPRITE* const target = goalSprite();
         if (target)
         {
-            const double dx = std::fabs(static_cast<double>(target->X()) - static_cast<double>(X()));
-            if (dx < 10.0 || std::isnan(dx))
+            const float dx = std::fabs(target->X() - X());
+            if (dx < 10.0f)
             {
-                const double dy = std::fabs(static_cast<double>(target->Y()) - static_cast<double>(Y()));
-                if (dy < 10.0 || std::isnan(dy))
+                const float dy = std::fabs(target->Y() - Y());
+                if (dy < 10.0f)
                     return 1;
             }
         }
@@ -299,7 +289,7 @@ namespace as1
                     const long double distance = approximatePlanarDistance(
                         target->X() - carrier->X(),
                         target->Y() - carrier->Y());
-                    if (!balloonX87LessOrUnordered(
+                    if (!balloonLessOrUnordered(
                             distance,
                             static_cast<long double>(carrier->Vid()->weaponBattleRange())))
                         rotateOnly = true;
@@ -312,7 +302,7 @@ namespace as1
             {
                 const std::uint32_t delta = std::max(
                     core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds(),
-                    static_cast<std::uint32_t>(Vid()->defaultFrameSpeed()));
+                    static_cast<std::uint32_t>(Vid()->hostFrameSpeedStorage(currentAnimation())));
                 if (RotateTact(ANGLE(static_cast<unsigned char>(carrier->directionIndex())), delta).Int() == 0)
                     ChangeAnimation(0);
                 return;
@@ -332,7 +322,7 @@ namespace as1
             if (best && best != target)
             {
                 const long double distance = approximatePlanarDistance(best->X() - X(), best->Y() - Y());
-                if (balloonX87LessOrUnordered(
+                if (balloonLessOrUnordered(
                         distance,
                         static_cast<long double>(Vid()->weaponBattleRange())))
                     setAttackCommandForTarget(best);
@@ -358,7 +348,7 @@ namespace as1
         if (best && best != target)
         {
             const double distance = balloonTargetDistance(this, best);
-            if (balloonX87LessOrUnordered(
+            if (balloonLessOrUnordered(
                     static_cast<long double>(distance),
                     static_cast<long double>(Vid()->weaponDetectRange())) &&
                 ammoCount() > 0)
@@ -426,14 +416,14 @@ namespace as1
         {
             const std::uint32_t delta = std::max(
                 core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds(),
-                static_cast<std::uint32_t>(Vid()->defaultFrameSpeed()));
+                static_cast<std::uint32_t>(Vid()->hostFrameSpeedStorage(currentAnimation())));
             setAttackDecisionCode(computeAttackDecisionCode(delta));
         }
 
         SPRITE* const current = goalSprite();
         if (attachmentTransitionPending() != 0u && current &&
-            balloonX87LessOrUnordered(std::fabs(static_cast<double>(current->X()) - static_cast<double>(X())), 10.0) &&
-            balloonX87LessOrUnordered(std::fabs(static_cast<double>(current->Y()) - static_cast<double>(Y())), 10.0))
+            std::fabs(current->X() - X()) < 10.0f &&
+            std::fabs(current->Y() - Y()) < 10.0f)
         {
             ChangeAnimation(15);
             return;
@@ -474,7 +464,7 @@ namespace as1
 
         if (SPRITE* const target = goalSprite())
         {
-            if (balloonUcomissNotEqualOrUnordered(Speed(), 0.0))
+            if (balloonNotEqualOrUnordered(Speed(), 0.0))
             {
                 const int reverse = Speed() < 0.0f ? 0x80 : 0;
                 const int desired = (RetailDirectionFromFloatXY(
@@ -485,8 +475,8 @@ namespace as1
             }
         }
 
-        if ((balloonUcomissNotEqualOrUnordered(X(), candidate.x) ||
-             balloonUcomissNotEqualOrUnordered(Y(), candidate.y)) &&
+        if ((balloonNotEqualOrUnordered(X(), candidate.x) ||
+             balloonNotEqualOrUnordered(Y(), candidate.y)) &&
             CanPlaceWithCrushAndGlide(&candidate.x, &candidate.y, &candidate.z) == nullptr)
         {
             steerAwayFromMapBoundary(candidate.x, candidate.y);

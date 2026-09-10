@@ -18,6 +18,9 @@
 #include <cstdio>
 #include <array>
 #include <new>
+#include <cmath>
+#include <limits>
+#include <xmmintrin.h>
 
 namespace as1 { namespace win { namespace sound
 {
@@ -63,13 +66,19 @@ namespace as1 { namespace win { namespace sound
 #endif
 
 
-        int retailFtolLowDword(float value) noexcept
+        int soundTruncateFloatToInt32(float value) noexcept
         {
-            const double d = static_cast<double>(value);
-            if (!(d == d) || d >= 9223372036854775808.0 || d < -9223372036854775808.0)
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(d);
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+            // The game logic converts the positional float directly with
+            // truncating float-to-int conversion.  In particular, NaN/out-of-range produces the 32-bit
+            // integer-indefinite value (0x80000000), not the low dword of an
+            // intermediate 64-bit conversion.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (!std::isfinite(value) || value < -2147483648.0f || value >= 2147483648.0f)
+                return std::numeric_limits<int>::min();
+            return static_cast<int>(value);
+#endif
         }
 
         int retailNegDoubleAbs32(int value) noexcept
@@ -1179,9 +1188,9 @@ namespace as1 { namespace win { namespace sound
     int SoundEngineWin::playSoundAtPosition(int soundNumber, float x, float y)
     {
 
-        const int integerX = retailFtolLowDword(x);
+        const int integerX = soundTruncateFloatToInt32(x);
         const int xAttenuation = retailNegDoubleAbs32(integerX);
-        const int integerY = retailFtolLowDword(y);
+        const int integerY = soundTruncateFloatToInt32(y);
         int volume = retailNegDoubleAbs32(integerY);
         if (xAttenuation < volume)
             volume = xAttenuation;

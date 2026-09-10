@@ -18,6 +18,7 @@
 #include <cstdlib>
 #include <memory>
 #include <limits>
+#include <xmmintrin.h>
 #include <new>
 
 namespace as1
@@ -37,9 +38,9 @@ namespace as1
         DWORD paletteBgra(const VID& vid, BYTE index)
         {
 #if defined(_MSC_VER) && defined(_M_IX86)
-            // The Stage11 x86 sidecar palette has no production population path.
+            // The Stage11 32-bit sidecar palette has no production population path.
             // Preserve its effective grayscale fallback without linking the
-            // reconstruction-only vector/unordered_map decode subsystem.
+            // legacy vector/unordered_map decode subsystem.
             (void)vid;
             const DWORD v = static_cast<DWORD>(index);
             return 0xFF000000u | (v << 16u) | (v << 8u) | v;
@@ -103,33 +104,28 @@ namespace as1
             return static_cast<std::int32_t>((static_cast<std::uint32_t>(value) ^ mask) - mask);
         }
 
-        int retailFtolLow32Hardware(float value) noexcept
+        int hardwareConvertFloatToInt32(float value) noexcept
         {
-            const long double d = static_cast<long double>(value);
-            if (!std::isfinite(d) ||
-                d < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                d > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (std::isnan(value) || value >= 2147483648.0f || value < -2147483648.0f)
+                return std::numeric_limits<int>::min();
+            return static_cast<int>(value);
+#endif
         }
 
-        int retailFtolDifferenceHardware(float lhs, float rhs) noexcept
+        int hardwareSubtractAndConvertToInt32(float lhs, float rhs) noexcept
         {
-            return retailFtolLow32Hardware(lhs - rhs);
+            const float value = lhs - rhs;
+            return hardwareConvertFloatToInt32(value);
         }
 
-        int retailFtolDifference3Hardware(float lhs, float rhs1, float rhs2) noexcept
+        int hardwareSubtractTwoAndConvertToInt32(float lhs, float rhs1, float rhs2) noexcept
         {
-            const long double value = static_cast<long double>(lhs) -
-                                      static_cast<long double>(rhs1) -
-                                      static_cast<long double>(rhs2);
-            if (!std::isfinite(value) ||
-                value < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                value > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(value));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+            float value = lhs - rhs1;
+            value -= rhs2;
+            return hardwareConvertFloatToInt32(value);
         }
 
         void deleteBaseTextureThroughVirtualDestructor(BASE_TEXTURE* texture) noexcept
@@ -682,8 +678,8 @@ namespace as1
         const int savedTop = g_softwareClipTop;
         const int savedBottom = g_softwareClipBottom;
 
-        const int spriteX = retailFtolLow32Hardware(sprite->X());
-        const int spriteYProjected = retailFtolDifferenceHardware(sprite->Y(), sprite->Z());
+        const int spriteX = hardwareConvertFloatToInt32(sprite->X());
+        const int spriteYProjected = hardwareSubtractAndConvertToInt32(sprite->Y(), sprite->Z());
         const int sourceHalfWidth = static_cast<std::int16_t>(sourceVid->vidWidth()) / 2;
         const int sourceHalfHeight = static_cast<std::int16_t>(sourceVid->vidHeight()) / 2;
 
@@ -779,9 +775,9 @@ namespace as1
         if ((auxFlags & 0x04u) != 0u)
         {
             const float position = sprite->actionAuxEffectCurvePosition();
-            effectOffsetX = retailFtolLow32Hardware(interpolateHardwareEffectCurve(this, position, 0x144));
-            effectOffsetY = retailFtolLow32Hardware(interpolateHardwareEffectCurve(this, position, 0x164));
-            effectOffsetZ = retailFtolLow32Hardware(interpolateHardwareEffectCurve(this, position, 0x184));
+            effectOffsetX = hardwareConvertFloatToInt32(interpolateHardwareEffectCurve(this, position, 0x144));
+            effectOffsetY = hardwareConvertFloatToInt32(interpolateHardwareEffectCurve(this, position, 0x164));
+            effectOffsetZ = hardwareConvertFloatToInt32(interpolateHardwareEffectCurve(this, position, 0x184));
         }
 
         int sampleCount = 1;
@@ -793,30 +789,48 @@ namespace as1
             {
                 const float historyX = sprite->blurHistoryX();
                 const float historyProjectedY = sprite->blurHistoryY() - sprite->blurHistoryZ();
-                const auto abs64 = [](std::int64_t value) noexcept -> std::int64_t { return value < 0 ? -value : value; };
-                const std::int64_t dx = abs64(static_cast<std::int64_t>(historyX - currentX)) / sampleWidth;
-                const std::int64_t dy = abs64(static_cast<std::int64_t>(historyProjectedY - currentProjectedY)) / first->height;
-                sampleCount = static_cast<int>(2 * std::max(dx, dy) + 1);
+                const int dx = retailAbs32(hardwareSubtractAndConvertToInt32(historyX, currentX)) / sampleWidth;
+                const int dy = retailAbs32(hardwareSubtractAndConvertToInt32(historyProjectedY, currentProjectedY)) / first->height;
+                sampleCount = retailWrapAdd32(retailWrapMul32(2, std::max(dx, dy)), 1);
             }
         }
 
         for (int sample = 0; sample < sampleCount; ++sample)
         {
-            int screenX = retailFtolDifferenceHardware(currentX, cameraX) + effectOffsetX;
-            int screenY = retailFtolDifference3Hardware(currentY, currentZ, cameraY) + effectOffsetY;
-            int spriteZInt = retailFtolLow32Hardware(currentZ) + effectOffsetZ;
+            int screenX = hardwareSubtractAndConvertToInt32(currentX, cameraX) + effectOffsetX;
+            int screenY = hardwareSubtractTwoAndConvertToInt32(currentY, currentZ, cameraY) + effectOffsetY;
+            int spriteZInt = hardwareConvertFloatToInt32(currentZ) + effectOffsetZ;
 
             if ((property & P_BLUR) != 0u)
             {
-                const double ratio = static_cast<double>(sample) / static_cast<double>(sampleCount);
+                const float sampleFloat = static_cast<float>(sample);
+                const float sampleCountFloat = static_cast<float>(sampleCount);
                 const float historyX = sprite->blurHistoryX();
                 const float historyY = sprite->blurHistoryY();
                 const float historyZ = sprite->blurHistoryZ();
-                const float historyProjectedY = historyY - historyZ;
-                screenX = static_cast<int>(currentX - cameraX + (historyX - currentX) * ratio);
-                screenY = static_cast<int>(currentProjectedY - cameraY +
-                                           (historyProjectedY - currentProjectedY) * ratio);
-                spriteZInt = static_cast<int>(currentZ + (historyZ - currentZ) * ratio);
+
+                float interpolatedXDelta = historyX - currentX;
+                interpolatedXDelta *= sampleFloat;
+                float interpolatedX = currentX - cameraX;
+                interpolatedXDelta /= sampleCountFloat;
+                interpolatedX += interpolatedXDelta;
+                screenX = hardwareConvertFloatToInt32(interpolatedX);
+
+                float historyProjectedY = historyY - historyZ;
+                historyProjectedY -= currentY;
+                historyProjectedY += currentZ;
+                float interpolatedY = currentY - currentZ;
+                interpolatedY -= cameraY;
+                historyProjectedY *= sampleFloat;
+                historyProjectedY /= sampleCountFloat;
+                interpolatedY += historyProjectedY;
+                screenY = hardwareConvertFloatToInt32(interpolatedY);
+
+                float interpolatedZDelta = historyZ - currentZ;
+                interpolatedZDelta *= sampleFloat;
+                interpolatedZDelta /= sampleCountFloat;
+                interpolatedZDelta += currentZ;
+                spriteZInt = hardwareConvertFloatToInt32(interpolatedZDelta);
             }
 
             if ((property & P_ALWAYSTOP) == 0u && (typeFlags & VID_TYPE_ZBUFFER) == 0u)

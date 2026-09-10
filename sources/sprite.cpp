@@ -74,8 +74,8 @@ namespace as1
         const char kEmptyString[] = "";
         const char kCommandRecordDelimiter[] = ";";
         const char kCommandWordPrefixMarker[] = { '\x01', '\0' };
-        constexpr unsigned short kX87TruncateRoundingBits = static_cast<unsigned short>(3u << 10);
-        constexpr unsigned short kX87RoundingBitsClearMask = static_cast<unsigned short>(~kX87TruncateRoundingBits);
+        constexpr unsigned short kTruncateRoundingModeBits = static_cast<unsigned short>(3u << 10);
+        constexpr unsigned short kRoundingModeClearMask = static_cast<unsigned short>(~kTruncateRoundingModeBits);
 
         enum class InternalActionCode : std::uint32_t
         {
@@ -333,7 +333,7 @@ namespace as1
             return static_cast<std::int32_t>(static_cast<std::uint32_t>(a) - static_cast<std::uint32_t>(b));
         }
 
-        int spriteFtolLow32(long double value) noexcept;
+        int spriteConvertFloatToInt32(long double value) noexcept;
 
         float spriteFildMulF32(std::int32_t value, float scale) noexcept
         {
@@ -371,20 +371,21 @@ namespace as1
 
         float spriteWeightedQuarterF32(float primary, float secondary) noexcept
         {
-
-            return static_cast<float>(
-                (static_cast<long double>(primary) * 3.0L +
-                 static_cast<long double>(secondary)) * 0.25L);
+            // The game logic case 15 performs single-precision multiplication -> single-precision addition -> single-precision multiplication.
+            // Preserve a binary32 rounding point after every arithmetic step.
+            const float weighted = primary * 3.0f;
+            const float summed = weighted + secondary;
+            return summed * 0.25f;
         }
 
-        int spriteAddF32StoreAndFtolLow32(float value, float addend,
+        int spriteAddRoundedFloatAndConvertToInt32(float value, float addend,
                                           float& storedValue) noexcept
         {
 
             const long double extended =
                 static_cast<long double>(value) + static_cast<long double>(addend);
             storedValue = static_cast<float>(extended);
-            return spriteFtolLow32(extended);
+            return spriteConvertFloatToInt32(extended);
         }
 
         bool spriteFcompC3(float lhs, float rhs) noexcept
@@ -392,7 +393,7 @@ namespace as1
             return lhs == rhs;
         }
 
-        int spriteFtolLow32(long double value) noexcept
+        int spriteConvertFloatToInt32(long double value) noexcept
         {
 
             if (!std::isfinite(value) ||
@@ -403,29 +404,29 @@ namespace as1
                 static_cast<std::uint64_t>(static_cast<std::int64_t>(std::trunc(value)))));
         }
 
-        int spriteFsubFtolLow32(float lhs, float rhs) noexcept
+        int spriteSubtractAndConvertToInt32(float lhs, float rhs) noexcept
         {
 
-            return spriteFtolLow32(static_cast<long double>(lhs) -
+            return spriteConvertFloatToInt32(static_cast<long double>(lhs) -
                                    static_cast<long double>(rhs));
         }
 
-        int spriteFsubStoreF32FtolLow32(float lhs, float rhs) noexcept
+        int spriteSubtractRoundedFloatAndConvertToInt32(float lhs, float rhs) noexcept
         {
             const float rounded = static_cast<float>(
                 static_cast<long double>(lhs) - static_cast<long double>(rhs));
-            return spriteFtolLow32(static_cast<long double>(rounded));
+            return spriteConvertFloatToInt32(static_cast<long double>(rounded));
         }
 
-        int spriteFmulFtolLow32(float value, float multiplier) noexcept
+        int spriteMultiplyAndConvertToInt32(float value, float multiplier) noexcept
         {
-            return spriteFtolLow32(static_cast<long double>(value) *
+            return spriteConvertFloatToInt32(static_cast<long double>(value) *
                                    static_cast<long double>(multiplier));
         }
 
-        int spriteFdivMulFtolLow32(float numerator, float denominator, float multiplier) noexcept
+        int spriteDivideMultiplyAndConvertToInt32(float numerator, float denominator, float multiplier) noexcept
         {
-            return spriteFtolLow32(static_cast<long double>(numerator) /
+            return spriteConvertFloatToInt32(static_cast<long double>(numerator) /
                                    static_cast<long double>(denominator) *
                                    static_cast<long double>(multiplier));
         }
@@ -464,7 +465,7 @@ namespace as1
         int pathDirectionDeltaXToInt(float lhs, float rhs) noexcept
         {
 
-            return spriteFtolLow32(
+            return spriteConvertFloatToInt32(
                 (static_cast<long double>(lhs) - static_cast<long double>(rhs) + 128.0L) *
                 0.00390625L);
         }
@@ -472,7 +473,7 @@ namespace as1
         int pathDirectionDeltaYToInt(float lhs, float rhs) noexcept
         {
 
-            return spriteFtolLow32(
+            return spriteConvertFloatToInt32(
                 (static_cast<long double>(lhs) - static_cast<long double>(rhs) + 128.0L) *
                 3.0L * 0.001953125L);
         }
@@ -481,7 +482,7 @@ namespace as1
         {
 
             const std::uint32_t scaled = static_cast<std::uint32_t>(
-                spriteFmulFtolLow32(speed, 1000.0f));
+                spriteMultiplyAndConvertToInt32(speed, 1000.0f));
             const std::uint32_t sign = 0u - (scaled >> 31);
             const std::uint32_t magnitude = (scaled ^ sign) - sign;
             const std::uint32_t plusTen = magnitude + 10u;
@@ -502,10 +503,10 @@ namespace as1
                                               float thisWeight, float targetWeight, int mode,
                                               float& sharedSpeedOut, float& relativeSpeedOut) noexcept
         {
-            // resolveEngineChainCollision keeps the weighted-speed division live in x87 extended
+            // resolveEngineChainCollision keeps the weighted-speed division live in extended precision extended
             // precision for the lower clamp comparison, stores a binary32 copy,
             // and computes relative speed from the two fabs values that remain
-            // on the x87 stack. Preserve both observable rounding boundaries.
+            // on the extended precision stack. Preserve both observable rounding boundaries.
             const long double thisSpeed = std::fabs(static_cast<long double>(thisSpeedRaw));
             const long double targetSpeed = std::fabs(static_cast<long double>(targetSpeedRaw));
             const long double numerator =
@@ -535,26 +536,24 @@ namespace as1
             return true;
         }
 
-        double trainEndpointMetric(float x, float y, float nodeX, float nodeY) noexcept
+        float trainEndpointMetric(float x, float y, float nodeX, float nodeY) noexcept
         {
-            // Every input is binary32 and the only scale is exactly 0.5, so
-            // double retains all finite x87 precision needed by this metric.
-            const double dx = std::fabs(static_cast<double>(x) - static_cast<double>(nodeX));
-            const double dy = std::fabs(static_cast<double>(y) - static_cast<double>(nodeY));
-
-            if (dx <= dy || std::isnan(dx) || std::isnan(dy))
-                return dx * 0.5 + dy;
-            return dx + dy * 0.5;
+            // The game logic keeps this entire weighted endpoint metric in
+            // binary32: single-precision subtraction -> fabs(float) -> single-precision multiplication(0.5) -> single-precision addition.
+            const float dx = std::fabs(x - nodeX);
+            const float dy = std::fabs(y - nodeY);
+            return !(dx > dy) ? dx * 0.5f + dy : dx + dy * 0.5f;
         }
 
         bool preferFirstTrainEndpoint(float x, float y,
-                                    float prevX, float prevY,
-                                    float nextX, float nextY) noexcept
+                                      float prevX, float prevY,
+                                      float nextX, float nextY) noexcept
         {
-            const double firstMetric = trainEndpointMetric(x, y, prevX, prevY);
-            const double lastMetric = trainEndpointMetric(x, y, nextX, nextY);
+            const float firstMetric = trainEndpointMetric(x, y, prevX, prevY);
+            const float lastMetric = trainEndpointMetric(x, y, nextX, nextY);
 
-            return firstMetric < lastMetric || std::isnan(firstMetric) || std::isnan(lastMetric);
+            // floating-point comparison next, previous + ordered greater-than test: ties and unordered choose next.
+            return lastMetric > firstMetric;
         }
 
         bool x87IsZeroOrUnordered(float value) noexcept
@@ -611,7 +610,7 @@ namespace as1
         {
             // Initial linked-child route in evaluateEngineTargetRangeState stores X/Y deltas to
             // binary32 stack locals, calls approximatePlanarDistance, then compares the live
-            // x87 metric with (radius-10) using TEST AH,41h. Recreate that
+            // extended precision metric with (radius-10) using comparison status test. Recreate that
             // exact numeric route without a premature metric spill.
             const long double ax = std::fabs(static_cast<long double>(deltaX));
             const long double ay = std::fabs(static_cast<long double>(deltaY));
@@ -730,10 +729,25 @@ namespace as1
         int computeRegionTileCount(float width, float height,
                                              float childSizeX, float childSizeY) noexcept
         {
-            const long double value =
-                static_cast<long double>(width) * static_cast<long double>(height) /
-                static_cast<long double>(childSizeX) / static_cast<long double>(childSizeY);
-            return spriteFtolLow32(value);
+            // The game logic uses single-precision multiplication -> single-precision division -> single-precision division -> truncating float-to-int conversion.
+            // The previous extended precision/long-double route changes both rounding and the
+            // NaN/out-of-range conversion result used by the spawn divisor.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            __m128 value = _mm_mul_ss(_mm_set_ss(width), _mm_set_ss(height));
+            value = _mm_div_ss(value, _mm_set_ss(childSizeX));
+            value = _mm_div_ss(value, _mm_set_ss(childSizeY));
+            return _mm_cvtt_ss2si(value);
+#else
+            const float product = width * height;
+            const float dividedX = product / childSizeX;
+            const float value = dividedX / childSizeY;
+            if (!std::isfinite(value) ||
+                value < -2147483648.0f || value >= 2147483648.0f)
+            {
+                return std::numeric_limits<std::int32_t>::min();
+            }
+            return static_cast<std::int32_t>(value);
+#endif
         }
 
         std::uint32_t computeChildAnimationCadence(int direction,
@@ -756,32 +770,63 @@ namespace as1
                 g_retailDirectionTrigWindow[512u + rawGraphDirection]);
             const float graphCos = spriteFloatFromBits(
                 g_retailDirectionTrigWindow[768u + rawGraphDirection]);
-            long double projectedX =
-                static_cast<long double>(dirSin) * static_cast<long double>(speed);
-            float projectedY = static_cast<float>(
-                static_cast<long double>(zSpeed) - static_cast<long double>(childMaxZ) +
-                static_cast<long double>(dirCos) * static_cast<long double>(speed));
+
+            // This calculation remains in binary32 precision throughout:
+            //   projectedY = (zSpeed - childMaxZ) + dirCos * speed
+            //   projectedX = dirSin * speed
+            // followed by optional wind subtraction.  The previous long-double
+            // Keep the intermediate values in single precision.
+            float projectedX = 0.0f;
+            float projectedY = 0.0f;
+#if defined(_MSC_VER) && defined(_M_IX86)
+            const __m128 speedV = _mm_set_ss(speed);
+            __m128 xV = _mm_mul_ss(_mm_set_ss(dirSin), speedV);
+            __m128 yV = _mm_sub_ss(_mm_set_ss(zSpeed), _mm_set_ss(childMaxZ));
+            yV = _mm_add_ss(yV, _mm_mul_ss(_mm_set_ss(dirCos), speedV));
             if (subtractGraphMotion)
             {
-                projectedX -= static_cast<long double>(graphSpeed) * static_cast<long double>(graphSin);
-                projectedY = static_cast<float>(
-                    static_cast<long double>(projectedY) -
-                    static_cast<long double>(graphSpeed) * static_cast<long double>(graphCos));
+                const __m128 windV = _mm_set_ss(graphSpeed);
+                xV = _mm_sub_ss(xV, _mm_mul_ss(_mm_set_ss(graphSin), windV));
+                yV = _mm_sub_ss(yV, _mm_mul_ss(_mm_set_ss(graphCos), windV));
             }
-            float xTime = 30000.0f;
-            if (projectedX != 0.0L && !std::isnan(projectedX))
-                xTime = static_cast<float>(static_cast<long double>(childSizeX) / std::fabs(projectedX));
+            projectedX = _mm_cvtss_f32(xV);
+            projectedY = _mm_cvtss_f32(yV);
+#else
+            projectedX = dirSin * speed;
+            projectedY = (zSpeed - childMaxZ) + dirCos * speed;
+            if (subtractGraphMotion)
+            {
+                projectedX = projectedX - graphSin * graphSpeed;
+                projectedY = projectedY - graphCos * graphSpeed;
+            }
+#endif
 
-            long double yTime = 30000.0L;
-            if (projectedY != 0.0f && !std::isnan(projectedY))
-                yTime = static_cast<long double>(childSizeY) /
-                    std::fabs(static_cast<long double>(projectedY));
-            const long double selected =
-                (static_cast<long double>(xTime) < yTime ||
-                 std::isnan(static_cast<long double>(xTime)) || std::isnan(yTime))
-                    ? static_cast<long double>(xTime)
-                    : yTime;
-            return static_cast<std::uint32_t>(spriteFtolLow32(selected));
+            // Retail's floating-point comparison/comparison status handling path uses 30000 only for exact
+            // +/-zero.  NaN intentionally enters the single-precision division path.
+            const float xTime = projectedX == 0.0f
+                ? 30000.0f
+                : childSizeX / std::fabs(projectedX);
+            const float yTime = projectedY == 0.0f
+                ? 30000.0f
+                : childSizeY / std::fabs(projectedY);
+
+            // single-precision minimum has source-operand NaN semantics and truncating float-to-int conversion returns
+            // INT_MIN for NaN/out-of-range.  Preserve both because the caller
+            // subsequently treats the stored DWORD as unsigned before clamping.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            const __m128 selected = _mm_min_ss(_mm_set_ss(xTime), _mm_set_ss(yTime));
+            return static_cast<std::uint32_t>(_mm_cvtt_ss2si(selected));
+#else
+            const float selected = (std::isnan(xTime) || std::isnan(yTime))
+                ? yTime
+                : std::min(xTime, yTime);
+            if (!std::isfinite(selected) ||
+                selected < -2147483648.0f || selected >= 2147483648.0f)
+            {
+                return 0x80000000u;
+            }
+            return static_cast<std::uint32_t>(static_cast<std::int32_t>(selected));
+#endif
         }
 
         int computeDirectionToTarget(float targetX, float targetY,
@@ -789,6 +834,7 @@ namespace as1
         {
             const float dx = targetX - sourceX;
             const float dy = targetY - sourceY;
+            // The game logic uses single-precision subtraction followed by truncating float-to-int conversion.
             const int x = static_cast<int>(dx);
             const int y = static_cast<int>(dy);
             int projectedLength = 0;
@@ -841,6 +887,36 @@ namespace as1
             return sum < right || std::isnan(sum) || std::isnan(right);
         }
 
+        bool f32SumGreaterThanAbsDiffOrdered(float boundA, float boundB,
+                                             float lhs, float rhs) noexcept
+        {
+            // The game logic case 15 uses single-precision subtraction/single-precision addition and ordered float comparison.
+            // Unordered comparisons are rejected by ordered comparison.
+            const float delta = lhs - rhs;
+            const float diff = std::fabs(delta);
+            const float bound = boundA + boundB;
+            return !std::isnan(diff) && !std::isnan(bound) && bound > diff;
+        }
+
+        bool f32SumLessOrUnordered(float lhsA, float lhsB, float rhs) noexcept
+        {
+            // The game uses single-precision addition followed by ordered float comparison for the terrain-height tests.
+            // ordered-less comparison is taken for both ordered-less and unordered.
+            const float sum = lhsA + lhsB;
+            return sum < rhs || std::isnan(sum) || std::isnan(rhs);
+        }
+
+        int spriteTruncateFloatToInt32(float value) noexcept
+        {
+            // truncating float-to-int conversion returns INT_MIN for NaN and out-of-range input.
+            if (!std::isfinite(value) ||
+                value < -2147483648.0f || value >= 2147483648.0f)
+            {
+                return std::numeric_limits<std::int32_t>::min();
+            }
+            return static_cast<std::int32_t>(value);
+        }
+
         bool shouldSuppressFlagmanCommand(std::int32_t x, std::int32_t y,
                                                 std::int32_t range,
                                                 float controlledX,
@@ -863,21 +939,25 @@ namespace as1
                                        float deathRange, std::int32_t damageRaw,
                                        int& damageOut) noexcept
         {
-            const long double dx = std::fabs(
-                static_cast<long double>(candidateX) - static_cast<long double>(sourceX));
-            const long double dy = std::fabs(
-                static_cast<long double>(candidateY) - static_cast<long double>(sourceY));
-            const long double metric =
-                (dx <= dy || std::isnan(dx) || std::isnan(dy))
-                    ? dx * 0.5L + dy
-                    : dx + dy * 0.5L;
-            const long double range = static_cast<long double>(deathRange);
-            if (!(metric <= range || std::isnan(metric) || std::isnan(range)))
+            // The game logic and the radial-damage tail of this code path are
+            // binary32 throughout: single-precision subtraction, single-precision multiplication, single-precision addition, single-precision division, single-precision subtraction, truncating float-to-int conversion.
+            const float dxRaw = candidateX - sourceX;
+            const float dyRaw = candidateY - sourceY;
+            const float dx = std::fabs(dxRaw);
+            const float dy = std::fabs(dyRaw);
+            const float metric = (dx <= dy || std::isnan(dx) || std::isnan(dy))
+                ? dx * 0.5f + dy
+                : dy * 0.5f + dx;
+
+            // floating-point comparison deathRange, metric / ordered-less comparison rejects ordered-less and unordered.
+            if (std::isnan(deathRange) || std::isnan(metric) || deathRange < metric)
                 return false;
-            const long double scaledDamage =
-                static_cast<long double>(damageRaw) -
-                static_cast<long double>(damageRaw) * metric / range;
-            damageOut = spriteFtolLow32(scaledDamage);
+
+            const float damage = static_cast<float>(damageRaw);
+            const float product = damage * metric;
+            const float quotient = product / deathRange;
+            const float scaledDamage = damage - quotient;
+            damageOut = spriteTruncateFloatToInt32(scaledDamage);
             return true;
         }
 
@@ -2172,27 +2252,22 @@ namespace as1
             if (candidateVid->spriteClassId() != B_REGION)
                 continue;
 
-            const double zGate = static_cast<double>(candidate->Z()) + 25.0;
-            if (zGate <= static_cast<double>(z) || std::isnan(zGate) || std::isnan(z))
+            const float zGate = candidate->Z() + 25.0f;
+            if (!(zGate > z))
                 continue;
 
             REGION* const region = static_cast<REGION*>(candidate);
             if ((region->regionFlags() & REGION::FullViewportFlag) == 0u)
             {
-                const double cx = static_cast<double>(candidate->X());
-                const double cy = static_cast<double>(candidate->Y());
-                const double halfWidth = static_cast<double>(region->regionWidth()) * 0.5;
-                const double halfHeight = static_cast<double>(region->regionHeight()) * 0.5;
-                const double px = static_cast<double>(x);
-                const double py = static_cast<double>(y);
-                const bool insideX =
-                    (cx - halfWidth <= px || std::isnan(cx - halfWidth) || std::isnan(px)) &&
-                    (px <= cx + halfWidth || std::isnan(px) || std::isnan(cx + halfWidth));
-                const bool insideY =
-                    (cy - halfHeight <= py || std::isnan(cy - halfHeight) || std::isnan(py)) &&
-                    (py <= cy + halfHeight || std::isnan(py) || std::isnan(cy + halfHeight));
-                if (!insideX || !insideY)
+                const float cx = candidate->X();
+                const float cy = candidate->Y();
+                const float halfWidth = region->regionWidth() * 0.5f;
+                const float halfHeight = region->regionHeight() * 0.5f;
+                if (!(x >= cx - halfWidth) || !(cx + halfWidth >= x) ||
+                    !(y >= cy - halfHeight) || !(cy + halfHeight >= y))
+                {
                     continue;
+                }
             }
 
             for (int index = 0; index < 6; ++index)
@@ -2209,30 +2284,39 @@ namespace as1
         drawRegionTilesAndFog();
     }
 
-    double REGION::regionScreenLeft() const noexcept
+    float REGION::regionScreenLeft() const noexcept
     {
-        return static_cast<double>(X()) - static_cast<double>(m_regionWidth) * 0.5 -
-               static_cast<double>(core::GlobalApplicationDrawDispatcherState().cameraShiftX());
+        // The game logic keeps the region bounds in binary32.
+        const float halfWidth = m_regionWidth * 0.5f;
+        float result = X() - halfWidth;
+        result -= core::GlobalApplicationDrawDispatcherState().cameraShiftX();
+        return result;
     }
 
-    double REGION::regionScreenTop() const noexcept
+    float REGION::regionScreenTop() const noexcept
     {
-        return static_cast<double>(Y()) - static_cast<double>(Z()) -
-               static_cast<double>(m_regionHeight) * 0.5 -
-               static_cast<double>(core::GlobalApplicationDrawDispatcherState().cameraShiftY());
+        const float halfHeight = m_regionHeight * 0.5f;
+        float result = Y() - Z();
+        result -= halfHeight;
+        result -= core::GlobalApplicationDrawDispatcherState().cameraShiftY();
+        return result;
     }
 
-    double REGION::regionScreenRight() const noexcept
+    float REGION::regionScreenRight() const noexcept
     {
-        return static_cast<double>(m_regionWidth) * 0.5 + static_cast<double>(X()) -
-               static_cast<double>(core::GlobalApplicationDrawDispatcherState().cameraShiftX());
+        const float halfWidth = m_regionWidth * 0.5f;
+        float result = X() + halfWidth;
+        result -= core::GlobalApplicationDrawDispatcherState().cameraShiftX();
+        return result;
     }
 
-    double REGION::regionScreenBottom() const noexcept
+    float REGION::regionScreenBottom() const noexcept
     {
-        return static_cast<double>(Y()) - static_cast<double>(Z()) +
-               static_cast<double>(m_regionHeight) * 0.5 -
-               static_cast<double>(core::GlobalApplicationDrawDispatcherState().cameraShiftY());
+        const float halfHeight = m_regionHeight * 0.5f;
+        float result = Y() - Z();
+        result += halfHeight;
+        result -= core::GlobalApplicationDrawDispatcherState().cameraShiftY();
+        return result;
     }
 
     void REGION::DrawDebugOverlay()
@@ -2244,10 +2328,10 @@ namespace as1
     {
         GRAPH* const graph = GRAPH::CurrentGraph();
         const DWORD white = GammaRawCreateOpaque(255, 255, 255);
-        graph->DrawRect(static_cast<float>(regionScreenLeft() - 1.0),
-                        static_cast<float>(regionScreenTop() - 1.0),
-                        static_cast<float>(regionScreenRight() + 1.0),
-                        static_cast<float>(regionScreenBottom() + 1.0),
+        graph->DrawRect(regionScreenLeft() - 1.0f,
+                        regionScreenTop() - 1.0f,
+                        regionScreenRight() + 1.0f,
+                        regionScreenBottom() + 1.0f,
                         white);
     }
 
@@ -2264,23 +2348,21 @@ namespace as1
             if ((m_regionFlags & FullViewportFlag) == 0u)
             {
                 graph->rawSetSoftwareClipBounds(
-                    spriteFtolLow32(static_cast<long double>(regionScreenLeft())),
-                    spriteFtolLow32(static_cast<long double>(regionScreenTop())),
-                    spriteFtolLow32(static_cast<long double>(regionScreenRight())),
-                    spriteFtolLow32(static_cast<long double>(regionScreenBottom())));
+                    spriteTruncateFloatToInt32(regionScreenLeft()),
+                    spriteTruncateFloatToInt32(regionScreenTop()),
+                    spriteTruncateFloatToInt32(regionScreenRight()),
+                    spriteTruncateFloatToInt32(regionScreenBottom()));
             }
 
-            const float halfHeight = static_cast<float>(
-                static_cast<long double>(m_regionHeight) * 0.5L);
-            float tileY = static_cast<float>(static_cast<long double>(savedY) - halfHeight);
-            const float tileYEnd = static_cast<float>(static_cast<long double>(savedY) + halfHeight);
+            const float halfHeight = m_regionHeight * 0.5f;
+            float tileY = savedY - halfHeight;
+            const float tileYEnd = savedY + halfHeight;
             int tileIndex = 0;
             while (x87OrderedLess(tileY, tileYEnd))
             {
-                const float halfWidth = static_cast<float>(
-                    static_cast<long double>(m_regionWidth) * 0.5L);
-                float tileX = static_cast<float>(static_cast<long double>(savedX) - halfWidth);
-                const float tileXEnd = static_cast<float>(static_cast<long double>(savedX) + halfWidth);
+                const float halfWidth = m_regionWidth * 0.5f;
+                float tileX = savedX - halfWidth;
+                const float tileXEnd = savedX + halfWidth;
                 while (x87OrderedLess(tileX, tileXEnd))
                 {
                     if ((regionVid->properties() & P_ONEPHASE) == 0u)
@@ -2300,10 +2382,10 @@ namespace as1
             {
                 const GraphViewportState& liveViewport = graph->viewportState();
                 graph->rawSetSoftwareClipBounds(
-                    spriteFtolLow32(static_cast<long double>(liveViewport.left)),
-                    spriteFtolLow32(static_cast<long double>(liveViewport.top)),
-                    spriteFtolLow32(static_cast<long double>(liveViewport.right)),
-                    spriteFtolLow32(static_cast<long double>(liveViewport.bottom)));
+                    spriteTruncateFloatToInt32(liveViewport.left),
+                    spriteTruncateFloatToInt32(liveViewport.top),
+                    spriteTruncateFloatToInt32(liveViewport.right),
+                    spriteTruncateFloatToInt32(liveViewport.bottom));
             }
         }
 
@@ -2355,10 +2437,10 @@ namespace as1
         }
         else
         {
-            graph->drawFogBufferOverlay(static_cast<float>(regionScreenLeft()),
-                              static_cast<float>(regionScreenTop()),
-                              static_cast<float>(regionScreenRight()),
-                              static_cast<float>(regionScreenBottom()),
+            graph->drawFogBufferOverlay(regionScreenLeft(),
+                              regionScreenTop(),
+                              regionScreenRight(),
+                              regionScreenBottom(),
                               m_fogStart, m_fogEnd, color, ramp,
                               m_fogRampPhase, blend);
         }
@@ -4083,8 +4165,8 @@ namespace as1
                 screenY >= static_cast<float>(graph->getViewportTop()) &&
                 screenY < static_cast<float>(graph->getViewportBottom()))
             {
-                const int pixelX = spriteFtolLow32(static_cast<long double>(screenX));
-                const int pixelY = spriteFtolLow32(static_cast<long double>(screenY));
+                const int pixelX = spriteConvertFloatToInt32(static_cast<long double>(screenX));
+                const int pixelY = spriteConvertFloatToInt32(static_cast<long double>(screenY));
                 const std::uint16_t* const depth = graph->softwareDepthBuffer();
                 const int pitch = graph->softwareDepthPitch();
                 const int pixelIndex = spriteAdd32Wrap(pixelX, spriteImul32Low(pitch, pixelY));
@@ -4214,15 +4296,17 @@ namespace as1
             int damage = argument1;
             if (damage > 0)
             {
-                if ((m_runtimeFlags & InvulnerableFlag) != 0u)
-                    return 0;
                 VID* const ownVid = Vid();
                 if (ownVid->nvid() != 350)
                 {
+                    // The game logic bypasses both the invulnerability flag and
+                    // child-shield scan for VID 350. Only child VID 181 is a full
+                    // damage blocker; 203 must not grant immunity.
+                    if ((m_runtimeFlags & InvulnerableFlag) != 0u)
+                        return 0;
                     for (SPRITE* child = childChain(); child; child = child->childChain())
                     {
-                        const int nvid = child->Vid()->nvid();
-                        if (nvid == 203 || nvid == 181)
+                        if (child->Vid()->nvid() == 181)
                             return 0;
                     }
 
@@ -4695,7 +4779,7 @@ namespace as1
                 float pushedY = pushedYInitial;
                 float pushedZ = blocker->Z();
 
-                // INC/CMP/JGE and DEC are raw signed x86 DWORD operations.
+                // increment/compare/decrement are raw signed 32-bit integer operations.
                 g_collisionPushRecursionDepth = spriteAdd32Wrap(g_collisionPushRecursionDepth, 1);
                 if (g_collisionPushRecursionDepth < 5 &&
                     blocker->CanPlaceWithCrushAndGlide(&pushedX, &pushedY, &pushedZ) == nullptr)
@@ -5348,7 +5432,7 @@ namespace as1
             return;
 
         const float position = m_actionAuxState->effectCurvePosition;
-        const int segment = static_cast<int>(position); // CVTTSS2SI: trunc toward zero.
+        const int segment = static_cast<int>(position); // truncating float-to-int conversion: trunc toward zero.
 
         const auto curveValue = [this, position, segment](int baseOffset) noexcept -> int
         {
@@ -5360,7 +5444,7 @@ namespace as1
             const float interpolated =
                 static_cast<float>(second - first) * (position - static_cast<float>(segment)) +
                 static_cast<float>(first);
-            return static_cast<int>(interpolated); // CVTTSS2SI.
+            return static_cast<int>(interpolated); // truncating float-to-int conversion.
         };
 
         const int blue = curveValue(0x0A4);
@@ -5404,11 +5488,26 @@ namespace as1
 
             if (duration != 0u)
             {
-                int segment = static_cast<int>(std::floor(aux->effectCurvePosition)) + 1;
-                if (segment < 1)
-                    segment = 1;
-                if (segment > 7)
-                    segment = 7;
+                // The game logic uses truncating float-to-int conversion (truncate toward zero), then
+                // increments the raw result.  It does not clamp this segment
+                // index before the < 7 threshold walk.
+                int segment = 0;
+#if defined(_MSC_VER) && defined(_M_IX86)
+                segment = _mm_cvtt_ss2si(_mm_set_ss(aux->effectCurvePosition));
+#else
+                const float curve = aux->effectCurvePosition;
+                if (!std::isfinite(curve) ||
+                    curve < -2147483648.0f || curve >= 2147483648.0f)
+                {
+                    segment = std::numeric_limits<std::int32_t>::min();
+                }
+                else
+                {
+                    segment = static_cast<std::int32_t>(curve);
+                }
+#endif
+                segment = static_cast<std::int32_t>(
+                    static_cast<std::uint32_t>(segment) + 1u);
 
                 const float elapsedF = static_cast<float>(elapsed);
                 const float durationF = static_cast<float>(duration);
@@ -6149,8 +6248,8 @@ namespace as1
             m_attackDecisionCode,
             goalNvid,
             bestNvid,
-            spriteFmulFtolLow32(m_speed, 1000.0f),
-            spriteFmulFtolLow32(m_zSpeed, 1000.0f),
+            spriteMultiplyAndConvertToInt32(m_speed, 1000.0f),
+            spriteMultiplyAndConvertToInt32(m_zSpeed, 1000.0f),
             static_cast<int>(m_actionTimer),
             static_cast<unsigned>((m_runtimeFlags & CrossedGoalXFlag) != 0u),
             static_cast<unsigned>((m_runtimeFlags & CrossedGoalYFlag) != 0u));
@@ -6176,8 +6275,8 @@ namespace as1
                 child->m_attackDecisionCode,
                 childGoalNvid,
                 childBestNvid,
-                spriteFmulFtolLow32(child->m_speed, 1000.0f),
-                spriteFmulFtolLow32(child->m_zSpeed, 1000.0f),
+                spriteMultiplyAndConvertToInt32(child->m_speed, 1000.0f),
+                spriteMultiplyAndConvertToInt32(child->m_zSpeed, 1000.0f),
                 static_cast<int>(child->m_actionTimer),
                 static_cast<unsigned>((child->m_runtimeFlags & CrossedGoalXFlag) != 0u),
                 static_cast<unsigned>((child->m_runtimeFlags & CrossedGoalYFlag) != 0u));
@@ -6652,7 +6751,7 @@ namespace as1
         if (x87EqualOrUnordered(result, 10000.0f))
             result = 0.0f;
 
-        return spriteFtolLow32(static_cast<long double>(result));
+        return spriteConvertFloatToInt32(static_cast<long double>(result));
     }
 
     int SPRITE::updateSecondaryPathPosition(core::PathPosition* pathPair) noexcept
@@ -6663,7 +6762,7 @@ namespace as1
         const int primaryProgress = primaryPathProgressRef();
         VID* const vid = Vid();
         const float radiusFloat = vid->weaponRadius();
-        const int radiusLimit = spriteFtolLow32(static_cast<long double>(radiusFloat));
+        const int radiusLimit = spriteConvertFloatToInt32(static_cast<long double>(radiusFloat));
 
         auto edgeAt = [](PathNode* node, int index) noexcept -> PathEdge&
         {
@@ -7201,7 +7300,7 @@ namespace as1
             if (candidateDelay < currentDelay ||
                 std::isnan(candidateDelay) || std::isnan(currentDelay))
             {
-                movementDelayMs = spriteFtolLow32(static_cast<long double>(candidateDelay));
+                movementDelayMs = spriteConvertFloatToInt32(static_cast<long double>(candidateDelay));
             }
         }
 
@@ -7466,7 +7565,7 @@ namespace as1
             ChangeAnimation(12);
             playSfxAtWorldPosition(16);
 
-            const int damage = spriteFmulFtolLow32(relativeSpeed, 1500.0f);
+            const int damage = spriteMultiplyAndConvertToInt32(relativeSpeed, 1500.0f);
             int thisDamage = damage / 2;
             int targetDamage = damage / 2;
 
@@ -7862,8 +7961,8 @@ namespace as1
             if (SPRITE* const child = linkedChild(ref))
             {
                 VID* const childVid = child->Vid();
-                // approximatePlanarDistance, then compares the live x87 result against
-                // [WEAPON+0x18]-10 with TEST AH,41h (<= or unordered).
+                // approximatePlanarDistance, then compares the live extended precision result against
+                // Compare the weapon range threshold using the original unordered-aware rule.
                 const float dx = owner->m_xyz.x - child->m_xyz.x;
                 const float dy = owner->m_xyz.y - child->m_xyz.y;
                 return metricWithinFromRoundedDeltas(
@@ -7885,8 +7984,8 @@ namespace as1
             if (SPRITE* const child = linkedChild(node))
             {
                 VID* const childVid = child->Vid();
-                // Loop routes 0x44CDB2+ keep the coordinate subtraction live
-                // in x87 instead of spilling the deltas before the metric.
+                // Loop routes keep the coordinate subtraction live
+                // in extended precision instead of spilling the deltas before the metric.
                 if (!metricWithinPositions(
                         owner->m_xyz.x, owner->m_xyz.y,
                         child->m_xyz.x, child->m_xyz.y,
@@ -8296,9 +8395,9 @@ namespace as1
 
         core::WeakController* const seed =
             core::findNearestLinkedNode3D(&core::globalWeakControllerMap(),
-                             spriteFtolLow32(static_cast<long double>(m_xyz.x)),
-                             spriteFtolLow32(static_cast<long double>(m_xyz.y)),
-                             spriteFtolLow32(static_cast<long double>(m_xyz.z)));
+                             spriteConvertFloatToInt32(static_cast<long double>(m_xyz.x)),
+                             spriteConvertFloatToInt32(static_cast<long double>(m_xyz.y)),
+                             spriteConvertFloatToInt32(static_cast<long double>(m_xyz.z)));
         if (!seed || seed->linkCount() == 0)
             return;
 
@@ -8384,13 +8483,13 @@ namespace as1
                      primaryPathEdgeIndexRef());
 
         core::findNearestPathPosition(seed,
-                         spriteFtolLow32(static_cast<long double>(radius) *
+                         spriteConvertFloatToInt32(static_cast<long double>(radius) *
                                              directionSin(facing) +
                                          static_cast<long double>(m_xyz.x)),
-                         spriteFtolLow32(static_cast<long double>(m_xyz.y) -
+                         spriteConvertFloatToInt32(static_cast<long double>(m_xyz.y) -
                                          static_cast<long double>(radius) *
                                              directionCos(facing)),
-                         spriteFtolLow32(static_cast<long double>(m_xyz.z)),
+                         spriteConvertFloatToInt32(static_cast<long double>(m_xyz.z)),
                          &primary);
         repairToCloserTarget(primary);
         storePrimary(primary);
@@ -8403,13 +8502,13 @@ namespace as1
                      secondaryPathEdgeIndexRef());
 
         core::findNearestPathPosition(seed,
-                         spriteFtolLow32(static_cast<long double>(radius) *
+                         spriteConvertFloatToInt32(static_cast<long double>(radius) *
                                              directionSin(reverseFacing) +
                                          static_cast<long double>(m_xyz.x)),
-                         spriteFtolLow32(static_cast<long double>(m_xyz.y) -
+                         spriteConvertFloatToInt32(static_cast<long double>(m_xyz.y) -
                                          static_cast<long double>(radius) *
                                              directionCos(reverseFacing)),
-                         spriteFtolLow32(static_cast<long double>(m_xyz.z)),
+                         spriteConvertFloatToInt32(static_cast<long double>(m_xyz.z)),
                          &secondary);
         repairToCloserTarget(secondary);
         storeSecondary(secondary);
@@ -8582,7 +8681,7 @@ namespace as1
         const long double value =
             static_cast<long double>(count) * static_cast<long double>(1.33f) +
             static_cast<long double>(0.5f);
-        return spriteFtolLow32(value);
+        return spriteConvertFloatToInt32(value);
     }
 
     void SPRITE::updateEngineChainSpeedTarget() noexcept
@@ -8603,7 +8702,7 @@ namespace as1
 
         if (x87EqualOrUnordered(head->engineTargetSpeedRef(), 0.0f) &&
             !x87EqualOrUnordered(range.weapon0CSum, 0.0f) &&
-            spriteFdivMulFtolLow32(range.weapon10Sum,
+            spriteDivideMultiplyAndConvertToInt32(range.weapon10Sum,
                                    range.weapon0CSum, 8.0f) > 7)
         {
             const std::uint32_t flags = head->m_runtimeFlags;
@@ -8657,7 +8756,7 @@ namespace as1
             head->engineTargetSpeedRef() = spriteFildMulStoreFloat(range.movementDelayMs, 0.001f);
             const int delay = x87EqualOrUnordered(range.weapon0CSum, 0.0f)
                 ? 0
-                : spriteFdivMulFtolLow32(range.weapon10Sum,
+                : spriteDivideMultiplyAndConvertToInt32(range.weapon10Sum,
                                          range.weapon0CSum, 8.0f);
             head->engineAccelerationDelayRef() = delay;
             if (delay == 0)
@@ -8679,7 +8778,7 @@ namespace as1
         }
 
         const float target = engineTargetSpeedRef();
-        // target vs speed, TEST AH,41h: acceleration runs only for an
+        // target vs speed, comparison status test: acceleration runs only for an
         // ordered target > speed comparison.
         if (!x87LessEqualOrUnordered(target, *speedOut))
         {
@@ -8706,7 +8805,7 @@ namespace as1
 
         if (x87LessOrUnordered(target, *speedOut))
         {
-            const int delay = spriteFtolLow32(
+            const int delay = spriteConvertFloatToInt32(
                 (static_cast<long double>(*speedOut) * 1000.0L + 10.0L) * -0.5L);
             engineAccelerationDelayRef() = delay;
 
@@ -8832,9 +8931,9 @@ namespace as1
             resolvedB4 = actionArgument3
                 ? reinterpret_cast<core::WeakController*>(static_cast<std::uintptr_t>(static_cast<std::uint32_t>(actionArgument3)))
                 : core::findNearestLinkedNode3D(&core::globalWeakControllerMap(),
-                                   spriteFtolLow32(static_cast<long double>(m_xyz.x)),
-                                   spriteFtolLow32(static_cast<long double>(m_xyz.y)),
-                                   spriteFtolLow32(static_cast<long double>(m_xyz.z)));
+                                   spriteConvertFloatToInt32(static_cast<long double>(m_xyz.x)),
+                                   spriteConvertFloatToInt32(static_cast<long double>(m_xyz.y)),
+                                   spriteConvertFloatToInt32(static_cast<long double>(m_xyz.z)));
             resolvedB8 = actionArgument2;
         }
 
@@ -9005,7 +9104,7 @@ namespace as1
 
         int startOrdinal = 0;
         const WEAPON* const weaponRecord = m_vid->weaponRecord();
-        if (childCount == 2 && weaponRecord != nullptr &&
+        if (childCount == 2 &&
             (*reinterpret_cast<const std::int32_t*>(weaponRecord->raw.data() + 4) & 0x10) != 0)
         {
             DWORD nextFlags = m_runtimeFlags;
@@ -9056,7 +9155,7 @@ namespace as1
             }
             else
             {
-                constexpr float kRand32767 = 0.000030518509f;
+                constexpr float kRandDivisor = 32767.0f;
                 if (m_vid->spriteClassId() == 23u &&
                     childX == 0.0f &&
                     childY == 0.0f)
@@ -9066,20 +9165,32 @@ namespace as1
                     {
                         const float width = region->regionWidth();
                         const float height = region->regionHeight();
-                        offset.x = width * 0.5f - static_cast<float>(std::rand()) * width * kRand32767;
-                        offset.y = height * 0.5f - static_cast<float>(std::rand()) * height * kRand32767 + Z();
+                        // The game logic keeps the random placement path as
+                        // integer-to-float conversion -> single-precision multiplication -> single-precision division.  Do not replace the divide
+                        // with a precomputed reciprocal: the binary32 rounding
+                        // point is observably different.
+                        const float randomWidth = static_cast<float>(std::rand()) * width;
+                        const float randomHeight = static_cast<float>(std::rand()) * height;
+                        offset.x = width * 0.5f - randomWidth / kRandDivisor;
+                        offset.y = height * 0.5f - randomHeight / kRandDivisor + Z();
                     }
                     else
                     {
-                        offset.x = static_cast<float>(std::rand()) * map->SizeX() * kRand32767 - X();
-                        offset.y = static_cast<float>(std::rand()) * map->SizeY() * kRand32767 - Y() + Z();
+                        const float randomWidth = static_cast<float>(std::rand()) * map->SizeX();
+                        const float randomHeight = static_cast<float>(std::rand()) * map->SizeY();
+                        offset.x = randomWidth / kRandDivisor - X();
+                        offset.y = randomHeight / kRandDivisor - Y() + Z();
                     }
                     offset.z = m_vid->childZ[m_currentAnimation];
                 }
                 else
                 {
-                    const float localX = childX - static_cast<float>(std::rand()) * (childX + childX) * kRand32767;
-                    const float localY = childY - static_cast<float>(std::rand()) * (childY + childY) * kRand32767;
+                    const float childXSpan = childX + childX;
+                    const float childYSpan = childY + childY;
+                    const float randomX = static_cast<float>(std::rand()) * childXSpan;
+                    const float randomY = static_cast<float>(std::rand()) * childYSpan;
+                    const float localX = childX - randomX / kRandDivisor;
+                    const float localY = childY - randomY / kRandDivisor;
                     projectileBaseX = -(localX * primaryCos);
                     projectileBaseY = -(localX * auxiliarySin);
                     offset.x = localY * primarySin + projectileBaseX;
@@ -9102,7 +9213,11 @@ namespace as1
 
             ANGLE childDirection = m_direction;
             if ((childVid->property & P_RANDBIRTH) != 0)
-                childDirection = ANGLE(std::rand() & 0xFF);
+                // The game uses signed rand() % 256 here (this code path), not a
+                // bit-mask shortcut.  rand() is non-negative in normal CRT
+                // operation, but retaining the expression also restores the
+                // game MSVC remainder code shape.
+                childDirection = ANGLE(std::rand() % 256);
 
             SPRITE* child = map->CreateSpriteViaFactory(childVid,
                                                                     target,
@@ -9132,12 +9247,19 @@ namespace as1
                         float helperY = goal->Y() + projectileRadius + projectileBaseY;
                         const float ownerZ = goal->Z();
 
+                        const float projectileDiameter = projectileRadius + projectileRadius;
                         for (int attempt = 0; attempt < 5; ++attempt)
                         {
-                            const float randomX = static_cast<float>(std::rand()) * projectileRadius * 0.000061037019f;
-                            const float randomY = static_cast<float>(std::rand()) * projectileRadius * 0.000061037019f;
-                            const float candidateX = goal->X() + projectileRadius + projectileBaseX - randomX;
-                            const float candidateY = goal->Y() + projectileRadius + projectileBaseY - randomY;
+                            // The game logic: single-precision addition(radius,radius), then for
+                            // each axis integer-to-float conversion -> single-precision multiplication(diameter) -> single-precision division(32767).
+                            const float randomXProduct =
+                                static_cast<float>(std::rand()) * projectileDiameter;
+                            const float randomYProduct =
+                                static_cast<float>(std::rand()) * projectileDiameter;
+                            const float randomX = randomXProduct / 32767.0f;
+                            const float randomY = randomYProduct / 32767.0f;
+                            const float candidateX = goal->X() + projectileBaseX + projectileRadius - randomX;
+                            const float candidateY = goal->Y() + projectileBaseY + projectileRadius - randomY;
 
                             const float candidateGround = map->GetGroundZ(VECTOR2{candidateX, candidateY});
                             if (ownerZ > candidateGround)
@@ -9297,7 +9419,7 @@ namespace as1
         const bool isEmptyVid = vid == MAP::NullVid();
         const int nvid = vid->nVid;
 
-        // [VID+0x3FC] DESTROY callback.
+        // Invoke the VID destroy callback.
         const int destroyFunction = vid->destroyScriptFunction();
         if (destroyFunction >= 0)
         {
@@ -10117,11 +10239,11 @@ namespace as1
                     continue;
                 }
 
-                if (!x87SumGreaterThanAbsDiffOrdered(
+                if (!f32SumGreaterThanAbsDiffOrdered(
                         rangeX, candidateVid->halfSizeX(), X(), candidate->X()) ||
-                    !x87SumGreaterThanAbsDiffOrdered(
+                    !f32SumGreaterThanAbsDiffOrdered(
                         rangeY, candidateVid->halfSizeY(), Y(), candidate->Y()) ||
-                    !x87SumGreaterThanAbsDiffOrdered(
+                    !f32SumGreaterThanAbsDiffOrdered(
                         rangeZ, candidateVid->sizeZ(), Z(), candidate->Z()))
                 {
                     continue;
@@ -10131,7 +10253,7 @@ namespace as1
                 const float midpointY = (candidate->Y() + Y()) * 0.5f;
                 const float midpointGround =
                     mapOwner()->GetGroundZ(VECTOR2{midpointX, midpointY});
-                if (x87SumLessOrUnordered(
+                if (f32SumLessOrUnordered(
                         candidate->Z(), candidateVid->sizeZ(), midpointGround))
                     continue;
 
@@ -10139,7 +10261,7 @@ namespace as1
                 const float nearSourceY = spriteWeightedQuarterF32(Y(), candidate->Y());
                 const float nearSourceGround =
                     mapOwner()->GetGroundZ(VECTOR2{nearSourceX, nearSourceY});
-                if (x87SumLessOrUnordered(
+                if (f32SumLessOrUnordered(
                         candidate->Z(), candidateVid->sizeZ(), nearSourceGround))
                     continue;
 
@@ -10147,13 +10269,17 @@ namespace as1
                 const float nearCandidateY = spriteWeightedQuarterF32(candidate->Y(), Y());
                 const float nearCandidateGround =
                     mapOwner()->GetGroundZ(VECTOR2{nearCandidateX, nearCandidateY});
-                if (x87SumLessOrUnordered(
+                if (f32SumLessOrUnordered(
                         candidate->Z(), candidateVid->sizeZ(), nearCandidateGround))
                     continue;
 
                 int damage = damageRaw;
-                if ((sourceVid->properties() & P_RADIALDAMAGE) != 0u)
+                if ((sourceVid->properties() & P_RADIALDAMAGE) != 0u &&
+                    deathRange != 0.0f)
                 {
+                    // Steam treats an exact zero radial range as the non-falloff
+                    // path. Unordered (NaN) still enters falloff and is rejected by
+                    // the floating-point comparison range test in computeFalloffDamage.
                     if (!computeFalloffDamage(
                             X(), Y(), candidate->X(), candidate->Y(),
                             deathRange, damageRaw, damage))
@@ -10266,13 +10392,13 @@ namespace as1
             {
                 yProbe = spriteFildAddF32(argument2, 80.0f);
                 const float ground = mapOwner()->GetGroundZ(VECTOR2{x, yProbe});
-                const int zAsInt = spriteAddF32StoreAndFtolLow32(ground, 80.0f, z);
+                const int zAsInt = spriteAddRoundedFloatAndConvertToInt32(ground, 80.0f, z);
                 helperY = spriteAdd32Wrap(helperY, zAsInt);
             }
             else
             {
                 const float ground = mapOwner()->GetGroundZ(VECTOR2{x, yProbe});
-                const int zAsInt = spriteAddF32StoreAndFtolLow32(ground, 19.0f, z);
+                const int zAsInt = spriteAddRoundedFloatAndConvertToInt32(ground, 19.0f, z);
                 helperY = spriteAdd32Wrap(helperY, spriteAdd32Wrap(zAsInt, -19));
             }
 
@@ -10323,9 +10449,8 @@ namespace as1
                 if ((itemVid->spriteTypeId() & mask) != 0u)
                     ++matchCount;
             }
-            if (matchCount == 0u)
-                return -1;
-
+            // The game logic performs signed integer division by the match count directly.
+            // There is no zero-match safety return in the normal game path.
             std::uint32_t selected = static_cast<std::uint32_t>(std::rand()) % matchCount;
             for (std::uint32_t i = 0; i < m_actionAuxState->items.count; ++i)
             {
@@ -10434,7 +10559,7 @@ namespace as1
                     const std::uint32_t now = as1::core::CurrentTimeMilliseconds();
                     const std::uint32_t previous = as1::core::PreviousWorldTimeMilliseconds();
                     const std::uint32_t frameDefault =
-                        static_cast<std::uint32_t>(vid->defaultFrameSpeed());
+                        static_cast<std::uint32_t>(vid->hostFrameSpeedStorage(m_currentAnimation));
                     const std::uint32_t delta = now - previous;
                     const std::uint32_t stepMs = delta > frameDefault ? delta : frameDefault;
                     RotateTact(spriteSub32Wrap(m_direction.Int(), 64), stepMs);
@@ -10445,7 +10570,7 @@ namespace as1
                     const std::uint32_t now = as1::core::CurrentTimeMilliseconds();
                     const std::uint32_t previous = as1::core::PreviousWorldTimeMilliseconds();
                     const std::uint32_t frameDefault =
-                        static_cast<std::uint32_t>(vid->defaultFrameSpeed());
+                        static_cast<std::uint32_t>(vid->hostFrameSpeedStorage(m_currentAnimation));
                     const std::uint32_t delta = now - previous;
                     const std::uint32_t stepMs = delta > frameDefault ? delta : frameDefault;
                     RotateTact(spriteAdd32Wrap(m_direction.Int(), 64), stepMs);
@@ -10458,7 +10583,7 @@ namespace as1
                     VID* const vid = m_vid;
                     const std::uint32_t previous = as1::core::PreviousWorldTimeMilliseconds();
                     const std::uint32_t frameDefault =
-                        static_cast<std::uint32_t>(vid->defaultFrameSpeed());
+                        static_cast<std::uint32_t>(vid->hostFrameSpeedStorage(m_currentAnimation));
                     const std::uint32_t now = as1::core::CurrentTimeMilliseconds();
                     const std::uint32_t delta = now - previous;
                     const std::uint32_t stepMs = delta > frameDefault ? delta : frameDefault;
@@ -10498,7 +10623,7 @@ namespace as1
             const std::uint32_t now = as1::core::CurrentTimeMilliseconds();
             const std::uint32_t previous = as1::core::PreviousWorldTimeMilliseconds();
             const std::uint32_t frameDefault =
-                static_cast<std::uint32_t>(vid->defaultFrameSpeed());
+                static_cast<std::uint32_t>(vid->hostFrameSpeedStorage(m_currentAnimation));
             const std::uint32_t delta = now - previous;
             const std::uint32_t stepMs = delta > frameDefault ? delta : frameDefault;
             RotateTact(argument1, stepMs);
@@ -10818,7 +10943,7 @@ namespace as1
         }
 
         case static_cast<std::uint32_t>(ActionCode::ACT_GET_BATTLE_RANGE):
-            return spriteFtolLow32(static_cast<long double>(weaponBattleRangeRetail()));
+            return spriteConvertFloatToInt32(static_cast<long double>(weaponBattleRangeRetail()));
 
         case static_cast<std::uint32_t>(ActionCode::ACT_GET_ANIMATION):
         {
@@ -10900,7 +11025,7 @@ namespace as1
         case static_cast<std::uint32_t>(ActionCode::ACT_GET_ZSPEED):
         {
 
-            returnValue = spriteFtolLow32(
+            returnValue = spriteConvertFloatToInt32(
                 static_cast<long double>(m_zSpeed) * 1000.0L);
 
             break;
@@ -10916,7 +11041,7 @@ namespace as1
         case static_cast<std::uint32_t>(ActionCode::ACT_GET_SPEED):
         {
 
-            returnValue = spriteFtolLow32(
+            returnValue = spriteConvertFloatToInt32(
                 static_cast<long double>(m_speed) * 1000.0L);
 
             break;
@@ -11217,8 +11342,7 @@ namespace as1
 
             if (m_currentAnimation != 10)
             {
-                // UCOMISS/TEST AH,44: ordered exact zero is the stationary
-                // branch; unordered follows the moving branch.
+                // Exact zero selects the stationary branch; NaN follows the moving branch.
                 if (m_speed != 0.0f)
                 {
                     if (m_currentAnimation != 2)

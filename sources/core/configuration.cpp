@@ -318,12 +318,12 @@ namespace as1 { namespace core
             constructStringFromBytes(debugModeKey, "DebugMode", std::strlen("DebugMode"));
             config.debugMode = profile_p::readProfileIntValue(config.configPath, gameSection, debugModeKey, 0);
 
-            // DrawFPS toggles Application+0x0C bit 0x20000 with default 0.
+            // DrawFPS controls the application FPS-overlay flag and defaults to disabled.
             STRING drawFpsKey;
             constructStringFromBytes(drawFpsKey, "DrawFPS", std::strlen("DrawFPS"));
             config.drawFps = profile_p::readProfileIntValue(config.configPath, gameSection, drawFpsKey, 0);
 
-            // DrawPresentation toggles Application+0x0C bit 0x40000 with default 1.
+            // DrawPresentation controls presentation rendering and defaults to enabled.
             STRING drawPresentationKey;
             constructStringFromBytes(drawPresentationKey, "DrawPresentation", std::strlen("DrawPresentation"));
             config.drawPresentation = profile_p::readProfileIntValue(config.configPath, gameSection, drawPresentationKey, 1);

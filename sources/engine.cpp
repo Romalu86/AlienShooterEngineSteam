@@ -43,7 +43,7 @@ namespace as1
             return reinterpret_cast<T*>(static_cast<std::uintptr_t>(static_cast<std::uint32_t>(value)));
         }
 
-        int engineFtolLow32(float value) noexcept
+        int engineConvertFloatToInt32(float value) noexcept
         {
             const long double d = static_cast<long double>(value);
             if (!std::isfinite(d) ||
@@ -71,13 +71,13 @@ namespace as1
 
         bool engineFcompEqualOrUnorderedZero(float value) noexcept
         {
-            // FCOMP/FNSTSW + TEST AH,40h takes the branch for equal and unordered.
+            // floating-point comparison + comparison status test takes the branch for equal and unordered.
             return value == 0.0f || std::isnan(value);
         }
 
         bool engineLessEqualOrUnordered(float lhs, float rhs) noexcept
         {
-            // TEST AH,41h observes C0|C3: less/equal and unordered all take the branch.
+            // Less-than, equality and unordered values all take this branch.
             return lhs <= rhs || std::isnan(lhs) || std::isnan(rhs);
         }
 
@@ -183,7 +183,7 @@ namespace as1
         if (!bulkDelete)
             clearPathNodeOwnership();
 
-        // [ENGINE+0x98] PrevEngine and [ENGINE+0x9C] NextEngine are the same
+        // PrevEngine and NextEngine are the same
         // action-list owner slots consumed by engineChainHead/engineChainTail.
         SPRITE* const first = chainPrevious();
         SPRITE* const second = chainNext();
@@ -616,7 +616,7 @@ namespace as1
                 const float x = engineFildToF32(argument1);
                 const float y = engineFildToF32(argument2);
                 const float groundPlus19 = mapOwner()->GetGroundZ(VECTOR2{x, y}) + 19.0f;
-                const int groundInt = engineFtolLow32(groundPlus19);
+                const int groundInt = engineConvertFloatToInt32(groundPlus19);
                 const int helperY = engineAdd32Wrap(engineAdd32Wrap(groundInt, argument2), -19);
                 SPRITE* const created = new (std::nothrow) SPRITE(
                     mapOwner(), MAP::NullVid(),
@@ -818,7 +818,7 @@ namespace as1
                 }
             }
 
-            int delta = static_cast<int>(vid->defaultFrameSpeed());
+            int delta = vid->hostFrameSpeedStorage(currentAnimation());
             const std::uint32_t elapsed = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
             if (elapsed > static_cast<std::uint32_t>(static_cast<unsigned short>(delta)))
                 delta = static_cast<int>(elapsed);
@@ -910,16 +910,16 @@ namespace as1
         core::WeakController* node = nullptr;
         if (project2D)
         {
-            const int iy = engineFtolLow32(y);
-            const int iz = engineFtolLow32(z);
-            const int ix = engineFtolLow32(x);
+            const int iy = engineConvertFloatToInt32(y);
+            const int iz = engineConvertFloatToInt32(z);
+            const int ix = engineConvertFloatToInt32(x);
             node = core::findNearestLinkedNode2D(&core::globalWeakControllerMap(), ix, engineSub32Wrap(iy, iz));
         }
         else
         {
-            const int iz = engineFtolLow32(z);
-            const int iy = engineFtolLow32(y);
-            const int ix = engineFtolLow32(x);
+            const int iz = engineConvertFloatToInt32(z);
+            const int iy = engineConvertFloatToInt32(y);
+            const int ix = engineConvertFloatToInt32(x);
             node = core::findNearestLinkedNode3D(&core::globalWeakControllerMap(), ix, iy, iz);
         }
         dispatchEnginePrivateCommand(23, 0, static_cast<int>(static_cast<std::uint32_t>(reinterpret_cast<std::uintptr_t>(node))), 0);

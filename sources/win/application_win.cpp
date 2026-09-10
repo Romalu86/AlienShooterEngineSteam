@@ -10,6 +10,7 @@
 #include <new>
 #include <cmath>
 #include <cstring>
+#include <xmmintrin.h>
 
 #include "sprite.h"
 #include "unit.h"
@@ -40,6 +41,7 @@
 #include "input/control_actions.h"
 #include "game/startup.h"
 #include "steam_store.h"
+#include "file_data.h"
 
 #ifndef AS1_WITH_STEAM
 #define AS1_WITH_STEAM 1
@@ -89,30 +91,38 @@ namespace as1 { namespace win
             return out;
         }
 
-        bool cameraX87LessOrUnordered(float lhs, float rhs) noexcept
+        bool cameraLessOrUnordered(float lhs, float rhs) noexcept
         {
             return std::isnan(lhs) || std::isnan(rhs) || lhs < rhs;
         }
 
-        bool cameraX87LessEqualOrUnordered(float lhs, float rhs) noexcept
+        bool cameraLessEqualOrUnordered(float lhs, float rhs) noexcept
         {
             return std::isnan(lhs) || std::isnan(rhs) || lhs <= rhs;
         }
 
-        bool cameraX87EqualOrUnordered(float lhs, float rhs) noexcept
+        bool cameraEqualOrUnordered(float lhs, float rhs) noexcept
         {
             return std::isnan(lhs) || std::isnan(rhs) || lhs == rhs;
         }
 
-        std::int32_t cameraElapsedScaleFtolLow32(std::uint32_t elapsed, float scale) noexcept
+        float cameraRetailMinss(float destination, float source) noexcept
         {
-            const long double d = static_cast<long double>(elapsed) * static_cast<long double>(scale);
-            if (!std::isfinite(d) ||
-                d < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                d > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<std::int32_t>(static_cast<std::uint32_t>(converted));
+            // single-precision minimum returns its source operand when either operand is NaN.
+            if (std::isnan(destination) || std::isnan(source))
+                return source;
+            return destination < source ? destination : source;
+        }
+
+        std::int32_t convertCameraElapsedScaleToInt32(std::uint32_t elapsed, float scale) noexcept
+        {
+            // The game logic converts the unsigned elapsed value to double only
+            // as an implementation detail, immediately narrows it to float, then
+            // performs single-precision multiplication and truncating float-to-int conversion.  Keep the observable arithmetic binary32.
+            const float value = static_cast<float>(elapsed) * scale;
+            if (!std::isfinite(value) || value < -2147483648.0f || value >= 2147483648.0f)
+                return static_cast<std::int32_t>(0x80000000u);
+            return static_cast<std::int32_t>(value);
         }
 
         int retailTerrainGridDimension(float extent) noexcept
@@ -121,10 +131,23 @@ namespace as1 { namespace win
             return (raw + (raw < 0 ? 7 : 0)) >> 3;
         }
 
-        std::uint32_t frameElapsedScaleFtolLow32(std::uint32_t elapsed, float scale) noexcept
+        std::uint32_t scaleFrameElapsedToInt32(std::uint32_t elapsed, float scale) noexcept
         {
-            const long double d = static_cast<long double>(elapsed) * static_cast<long double>(scale);
-            if (!std::isfinite(d) || d >= 9223372036854775808.0L || d < -9223372036854775808.0L)
+            // The game logic first narrows elapsed to binary32 and performs
+            // an actual scalar SIMD single-precision multiplication before this code path.  A plain C++ float
+            // expression is not sufficient on MSVC 32-bit: pass19 candidate #1
+            // proved that the compiler can keep ApplicationTickScale() in extended precision
+            // and emit extended-precision multiplication, changing the rounding point.  Force the observable
+            // binary32 multiply through the matching SIMD intrinsic.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            const __m128 elapsedSs = _mm_set_ss(static_cast<float>(elapsed));
+            const __m128 scaleSs = _mm_set_ss(scale);
+            const float value = _mm_cvtss_f32(_mm_mul_ss(elapsedSs, scaleSs));
+#else
+            const float value = static_cast<float>(elapsed) * scale;
+#endif
+            const double d = static_cast<double>(value);
+            if (!std::isfinite(d) || d >= 9223372036854775808.0 || d < -9223372036854775808.0)
                 return 0u;
             const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
             return static_cast<std::uint32_t>(converted);
@@ -275,7 +298,7 @@ namespace as1 { namespace win
         {
             if (!vid)
                 return;
-            // Portable syntax/runtime validation cannot reproduce MSVC x86
+            // Portable syntax/runtime validation cannot reproduce MSVC 32-bit
             // scalar-deleting-destructor codegen.  The host branch preserves
             // lifetime only; native acceptance is gated separately.
             delete vid;
@@ -488,10 +511,15 @@ namespace as1 { namespace win
 
         std::string startupCurrentDirectoryText()
         {
-            char buffer[MAX_PATH] = {};
+            // The game logic uses a 0x1000-byte buffer and an empty string
+            // when GetCurrentDirectoryA fails.  Keep the normal successful path
+            // exact without MAX_PATH truncation.
+            char buffer[0x1000] = {};
             const DWORD count = ::GetCurrentDirectoryA(static_cast<DWORD>(sizeof(buffer)), buffer);
-            if (count == 0 || count >= sizeof(buffer))
-                return ".";
+            if (count == 0)
+                return "";
+            if (count >= sizeof(buffer))
+                return ""; // avoid consuming undefined/truncated bytes on modern hosts
             return buffer;
         }
     }
@@ -553,8 +581,8 @@ namespace as1 { namespace win
         releaseShellOwnedSpriteOwner(this);
         deinitialize();
 #if !AS1_WITH_STEAM
-        // Persist offline stats even if a script exits without explicitly calling
-        // StoreSaveStatsIfNeeded(). Keep the Steam shutdown behavior untouched.
+        // Retail owns a local persistent Store backend; flush it even when a
+        // script exits without an explicit SaveStats call.
         as1::steam::Shutdown();
 #endif
         destroyBaseApplicationState();
@@ -671,6 +699,11 @@ namespace as1 { namespace win
         baseInit.startupFlags = startupSettings ? startupSettings->flags : 0u;
         initializeBase(baseInit);
 
+        // The game captures absolute options/save profile paths from the startup
+        // current directory (this code path + startup block around this branch).
+        // Keep them stable even if the process CWD is changed later.
+        as1::InitializeFileDataProfilePaths(as1::STRING(startupCurrentDirectoryText()));
+
         as1::InitializeGlobalFileLoggerOwner(true);
 
         const char* const commandLine = (commandLineOwner && *commandLineOwner) ? *commandLineOwner : "";
@@ -698,12 +731,12 @@ namespace as1 { namespace win
             return this;
         }
 #else
-        // Retail scripts still use the Steam-era numeric Store extern ABI.
-        // Bring up the offline backend unconditionally, even when a standalone
-        // cfg correctly omits the Steam= entry.
-        if (!as1::steam::Initialize(windowConfig.steamAppId != -1
-                                        ? windowConfig.steamAppId
-                                        : as1::steam::AppId))
+        // Retail scripts keep the same Store extern interface, backed locally.
+        // Initialize it even when a standalone configuration omits Steam=.
+        const int storeAppId = windowConfig.steamAppId != -1
+            ? windowConfig.steamAppId
+            : as1::steam::AppId;
+        if (!as1::steam::Initialize(storeAppId))
         {
             if (as1::g_fileLogger)
                 as1::writeLogLine(as1::g_fileLogger, "Can't init retail store backend");
@@ -923,7 +956,7 @@ namespace as1 { namespace win
             }
         }
 
-        // Application+0x58: 16 BaseSpriteList traversal owners, stride 0x10.
+        // The application owns sixteen BaseSpriteList traversal buckets.
         core::ApplicationDrawDispatcherState& drawState = core::GlobalApplicationDrawDispatcherState();
         for (int pass = 0; pass < core::ApplicationDrawDispatcherState::PassCount; ++pass)
         {
@@ -2036,7 +2069,7 @@ namespace as1 { namespace win
         if (elapsed > kFrameClampMs)
             elapsed = kFrameClampMs;
 
-        const std::uint32_t increment = frameElapsedScaleFtolLow32(
+        const std::uint32_t increment = scaleFrameElapsedToInt32(
             elapsed, as1::core::ApplicationTickScale());
         as1::core::SetCurrentTimeMilliseconds(current + increment);
 
@@ -2688,9 +2721,9 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
 
         if ((mode & 0x21u) != 0)
         {
-            if (cameraX87LessEqualOrUnordered(clientX, kCameraEdgeThreshold) && (mode & 0x01u) != 0)
+            if (cameraLessEqualOrUnordered(clientX, kCameraEdgeThreshold) && (mode & 0x01u) != 0)
             {
-                if (cameraX87LessOrUnordered(-maxX, velocityX))
+                if (cameraLessOrUnordered(-maxX, velocityX))
                     velocityX -= kCameraAccelerationX;
             }
             else if ((graphRight - kCameraEdgeThreshold) > clientX && (mode & 0x01u) != 0)
@@ -2698,12 +2731,12 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
 
                 if ((inputFlags & 0x80u) != 0 && (mode & 0x20u) != 0)
                 {
-                    if (cameraX87LessOrUnordered(-maxX, velocityX))
+                    if (cameraLessOrUnordered(-maxX, velocityX))
                         velocityX -= kCameraAccelerationX;
                 }
                 else if ((inputFlags & 0x0100u) != 0 && (mode & 0x20u) != 0)
                 {
-                    if (cameraX87LessOrUnordered(velocityX, maxX))
+                    if (cameraLessOrUnordered(velocityX, maxX))
                         velocityX += kCameraAccelerationX;
                 }
                 else
@@ -2711,37 +2744,37 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
             }
             else if ((mode & 0x01u) != 0)
             {
-                if (cameraX87LessOrUnordered(velocityX, maxX))
+                if (cameraLessOrUnordered(velocityX, maxX))
                     velocityX += kCameraAccelerationX;
             }
             else if ((inputFlags & 0x80u) != 0 && (mode & 0x20u) != 0)
             {
-                if (cameraX87LessOrUnordered(-maxX, velocityX))
+                if (cameraLessOrUnordered(-maxX, velocityX))
                     velocityX -= kCameraAccelerationX;
             }
             else if ((inputFlags & 0x0100u) != 0 && (mode & 0x20u) != 0)
             {
-                if (cameraX87LessOrUnordered(velocityX, maxX))
+                if (cameraLessOrUnordered(velocityX, maxX))
                     velocityX += kCameraAccelerationX;
             }
             else
                 velocityX = 0.0f;
 
-            if (cameraX87LessEqualOrUnordered(clientY, kCameraEdgeThreshold) && (mode & 0x01u) != 0)
+            if (cameraLessEqualOrUnordered(clientY, kCameraEdgeThreshold) && (mode & 0x01u) != 0)
             {
-                if (cameraX87LessOrUnordered(-maxY, velocityY))
+                if (cameraLessOrUnordered(-maxY, velocityY))
                     velocityY -= kCameraAccelerationY;
             }
             else if ((graphBottom - kCameraEdgeThreshold) > clientY && (mode & 0x01u) != 0)
             {
                 if ((inputFlags & 0x0400u) != 0 && (mode & 0x20u) != 0)
                 {
-                    if (cameraX87LessOrUnordered(-maxY, velocityY))
+                    if (cameraLessOrUnordered(-maxY, velocityY))
                         velocityY -= kCameraAccelerationY;
                 }
                 else if ((inputFlags & 0x0200u) != 0 && (mode & 0x20u) != 0)
                 {
-                    if (cameraX87LessOrUnordered(velocityY, maxY))
+                    if (cameraLessOrUnordered(velocityY, maxY))
                         velocityY += kCameraAccelerationY;
                 }
                 else
@@ -2749,17 +2782,17 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
             }
             else if ((mode & 0x01u) != 0)
             {
-                if (cameraX87LessOrUnordered(velocityY, maxY))
+                if (cameraLessOrUnordered(velocityY, maxY))
                     velocityY += kCameraAccelerationY;
             }
             else if ((inputFlags & 0x0400u) != 0 && (mode & 0x20u) != 0)
             {
-                if (cameraX87LessOrUnordered(-maxY, velocityY))
+                if (cameraLessOrUnordered(-maxY, velocityY))
                     velocityY -= kCameraAccelerationY;
             }
             else if ((inputFlags & 0x0200u) != 0 && (mode & 0x20u) != 0)
             {
-                if (cameraX87LessOrUnordered(velocityY, maxY))
+                if (cameraLessOrUnordered(velocityY, maxY))
                     velocityY += kCameraAccelerationY;
             }
             else
@@ -2772,35 +2805,45 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
         }
 
         SPRITE* target = controlledSpriteForPlayer(static_cast<int>(as1::core::ActivePlayerIndex()));
-        const bool noVelocity =
-            cameraX87EqualOrUnordered(velocityX, 0.0f) &&
-            cameraX87EqualOrUnordered(velocityY, 0.0f);
+        // The game logic uses floating-point comparison and enters follow modes only for
+        // ordered zero.  Unordered/NaN must not be treated as zero.
+        const bool noVelocity = velocityX == 0.0f && velocityY == 0.0f;
         if (target && (mode & 0x04u) != 0 && noVelocity)
         {
-            velocityX = static_cast<float>(
-                ((static_cast<double>(target->X()) - static_cast<double>(cameraShiftX)) -
-                 static_cast<double>(graphWidth) * 0.5) *
-                static_cast<double>(kCameraTargetFollowScale));
-            velocityY = static_cast<float>(
-                (((static_cast<double>(target->Y()) - static_cast<double>(target->Z())) -
-                  static_cast<double>(cameraShiftY)) -
-                 static_cast<double>(graphHeight) * 0.5) *
-                static_cast<double>(kCameraTargetFollowScale));
+            float targetDeltaX = target->X() - cameraShiftX;
+            targetDeltaX -= graphWidth * 0.5f;
+            velocityX = targetDeltaX / 1000.0f;
+
+            float targetDeltaY = target->Y() - target->Z();
+            targetDeltaY -= cameraShiftY;
+            targetDeltaY -= graphHeight * 0.5f;
+            velocityY = targetDeltaY / 1000.0f;
         }
         else if (target && (mode & 0x08u) != 0 && noVelocity)
         {
-            const float pointerTargetX = static_cast<float>(
-                (static_cast<double>(target->X()) - static_cast<double>(cameraShiftX) +
-                 static_cast<double>(clientX)) * 0.5);
-            const float pointerTargetY = static_cast<float>(
-                ((static_cast<double>(target->Y()) - static_cast<double>(target->Z()) -
-                  static_cast<double>(cameraShiftY) + static_cast<double>(clientY)) * 0.5));
-            velocityX = static_cast<float>(
-                (static_cast<double>(graphWidth) * 0.5 - static_cast<double>(pointerTargetX)) *
-                static_cast<double>(kCameraPointerFollowScale));
-            velocityY = static_cast<float>(
-                (static_cast<double>(graphHeight) * 0.5 - static_cast<double>(pointerTargetY)) *
-                static_cast<double>(kCameraPointerFollowScale));
+            // Retail clamps the pointer into its 640x480 logical follow window
+            // inside the actual render surface before averaging it with the target.
+            float pointerX = graphWidth - 640.0f;
+            if (!(pointerX > clientX))
+                pointerX = cameraRetailMinss(640.0f, clientX);
+            float pointerY = graphHeight - 480.0f;
+            if (!(pointerY > clientY))
+                pointerY = cameraRetailMinss(480.0f, clientY);
+
+            float pointerTargetX = target->X() - cameraShiftX;
+            pointerTargetX += pointerX;
+            pointerTargetX *= 0.5f;
+            float pointerTargetY = target->Y() - target->Z();
+            pointerTargetY -= cameraShiftY;
+            pointerTargetY += pointerY;
+            pointerTargetY *= 0.5f;
+
+            velocityX = graphWidth * 0.5f - pointerTargetX;
+            velocityX /= -1000.0f;
+            velocityX *= 4.0f;
+            velocityY = graphHeight * 0.5f - pointerTargetY;
+            velocityY /= -1000.0f;
+            velocityY *= 4.0f;
         }
         else if (target && (mode & 0x10u) != 0 && noVelocity)
         {
@@ -2813,14 +2856,14 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
         const std::uint32_t current = as1::core::CurrentTimeMilliseconds();
         const std::uint32_t previous = as1::core::PreviousWorldTimeMilliseconds();
         const std::uint32_t deltaMs = current - previous;
-        const std::int32_t dx = cameraElapsedScaleFtolLow32(deltaMs, velocityX);
-        const std::int32_t dy = cameraElapsedScaleFtolLow32(deltaMs, velocityY);
-        const float centerX = static_cast<float>(
-            static_cast<double>(dx) + static_cast<double>(graphWidth) * 0.5 +
-            static_cast<double>(cameraShiftX));
-        const float centerY = static_cast<float>(
-            static_cast<double>(dy) + static_cast<double>(graphHeight) * 0.5 +
-            static_cast<double>(cameraShiftY));
+        const std::int32_t dx = convertCameraElapsedScaleToInt32(deltaMs, velocityX);
+        const std::int32_t dy = convertCameraElapsedScaleToInt32(deltaMs, velocityY);
+        float centerX = graphWidth * 0.5f;
+        centerX += cameraShiftX;
+        centerX += static_cast<float>(dx);
+        float centerY = graphHeight * 0.5f;
+        centerY += cameraShiftY;
+        centerY += static_cast<float>(dy);
         map->SetShiftCoor(centerX, centerY, 0);
     }
 

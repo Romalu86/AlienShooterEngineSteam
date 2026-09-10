@@ -11,9 +11,21 @@ namespace as1
     {
         struct ResolvedFileDataPath
         {
-            const char* fileName;
+            std::string fileName;
             std::string entryPath;
         };
+
+        std::string& optionsProfilePath()
+        {
+            static std::string path = "saves\\options.ini";
+            return path;
+        }
+
+        std::string& saveProfilePath()
+        {
+            static std::string path = "saves\\save.ini";
+            return path;
+        }
 
         ResolvedFileDataPath resolveFileDataPath(const STRING& input)
         {
@@ -21,10 +33,10 @@ namespace as1
             for (std::size_t at = path.find('/'); at != std::string::npos; at = path.find('/', at))
                 path.erase(at, 1u);
 
-            const char* fileName = "saves\\save.ini";
+            std::string fileName = saveProfilePath();
             if (path.compare(0u, 10u, "options:\\") == 0)
             {
-                fileName = "saves\\options.ini";
+                fileName = optionsProfilePath();
                 path.erase(0u, 10u);
             }
             else if (path.compare(0u, 7u, "save:\\") == 0)
@@ -32,7 +44,7 @@ namespace as1
                 path.erase(0u, 7u);
             }
 
-            return {fileName, std::move(path)};
+            return {std::move(fileName), std::move(path)};
         }
 
         std::string loadWholeFile(const char* fileName)
@@ -199,18 +211,29 @@ namespace as1
         }
     }
 
+    void InitializeFileDataProfilePaths(const STRING& startupDirectory)
+    {
+        // Game startup stores GetCurrentDirectory() + fixed profile suffixes
+        // in persistent startup-owned storage. FileData calls reuse those stored paths;
+        // they do not resolve relative paths again on each access.
+        const char* const raw = startupDirectory.c_str();
+        const std::string base = raw ? raw : "";
+        optionsProfilePath() = base + "\\saves\\options.ini";
+        saveProfilePath() = base + "\\saves\\save.ini";
+    }
+
     void FileDataSave(const STRING& path, const STRING& value)
     {
         const ResolvedFileDataPath resolved = resolveFileDataPath(path);
-        std::string contents = loadWholeFile(resolved.fileName);
+        std::string contents = loadWholeFile(resolved.fileName.c_str());
         writeRetailIniValue(contents, resolved.entryPath, value.c_str());
-        storeWholeFile(resolved.fileName, contents);
+        storeWholeFile(resolved.fileName.c_str(), contents);
     }
 
     STRING FileDataLoad(const STRING& path, const STRING& defaultValue)
     {
         const ResolvedFileDataPath resolved = resolveFileDataPath(path);
-        const std::string contents = loadWholeFile(resolved.fileName);
+        const std::string contents = loadWholeFile(resolved.fileName.c_str());
         return STRING(readRetailIniValue(contents, resolved.entryPath, defaultValue.c_str()).c_str());
     }
 

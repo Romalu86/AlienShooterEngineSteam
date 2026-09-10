@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <xmmintrin.h>
 #include <array>
 #include <cstring>
 #include <memory>
@@ -21,31 +22,33 @@ namespace as1
 {
     namespace
     {
-        int retailDrawXFtolSoftware(float x, float cameraX, int halfWidth) noexcept
+        int truncateFloatToInt32Software(float value) noexcept
         {
-            const long double value = static_cast<long double>(x) -
-                                      static_cast<long double>(cameraX) -
-                                      static_cast<long double>(halfWidth);
-            if (!std::isfinite(value) ||
-                value < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                value > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(value));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (std::isnan(value) || value >= 2147483648.0f || value < -2147483648.0f)
+                return std::numeric_limits<int>::min();
+            return static_cast<int>(value);
+#endif
         }
 
-        int retailDrawYFtolSoftware(float y, float z, float cameraY, int halfHeight) noexcept
+        int retailWrapSubSoftware(int lhs, int rhs) noexcept
         {
-            const long double value = static_cast<long double>(y) -
-                                      static_cast<long double>(z) -
-                                      static_cast<long double>(cameraY) -
-                                      static_cast<long double>(halfHeight);
-            if (!std::isfinite(value) ||
-                value < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                value > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(value));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+            return static_cast<int>(static_cast<std::uint32_t>(lhs) - static_cast<std::uint32_t>(rhs));
+        }
+
+        int softwareDrawXToInt32(float x, float cameraX, int halfWidth) noexcept
+        {
+            int value = retailWrapSubSoftware(truncateFloatToInt32Software(x), truncateFloatToInt32Software(cameraX));
+            return retailWrapSubSoftware(value, halfWidth);
+        }
+
+        int softwareDrawYToInt32(float y, float z, float cameraY, int halfHeight) noexcept
+        {
+            float projectedY = y - z;
+            int value = retailWrapSubSoftware(truncateFloatToInt32Software(projectedY), truncateFloatToInt32Software(cameraY));
+            return retailWrapSubSoftware(value, halfHeight);
         }
     }
 #if defined(_MSC_VER) && defined(_M_IX86)
@@ -704,8 +707,8 @@ namespace as1
         const core::ApplicationDrawDispatcherState& appDraw = core::GlobalApplicationDrawDispatcherState();
         const float cameraX = appDraw.cameraShiftX();
         const float cameraY = appDraw.cameraShiftY();
-        const int drawLeft = retailDrawXFtolSoftware(sprite->X(), cameraX, sizeX / 2);
-        int drawTop = retailDrawYFtolSoftware(sprite->Y(), sprite->Z(), cameraY, sizeY / 2);
+        const int drawLeft = softwareDrawXToInt32(sprite->X(), cameraX, sizeX / 2);
+        int drawTop = softwareDrawYToInt32(sprite->Y(), sprite->Z(), cameraY, sizeY / 2);
 
         if (drawLeft + sizeX < clipLeft || drawLeft >= clipRight ||
             drawTop + sizeY < clipTop || drawTop >= clipBottom)
@@ -869,7 +872,7 @@ namespace as1
 
                         if (alphaPalettePayload)
                         {
-                            // drawAlphaPaletteSpanWithDepth: unsigned JB, so equality is accepted.
+                            // drawAlphaPaletteSpanWithDepth: unsigned ordered-less comparison, so equality is accepted.
                             if (z < oldDepth)
                                 continue;
                         }
@@ -880,8 +883,8 @@ namespace as1
                         }
                         else if (palettePayload)
                         {
-                            // 4139E0/413A54 route through drawOpaquePaletteSpanWithDepth.  Its CMP
-                            // is WORD + signed JLE, so the new constant depth must
+                            // These paths route through drawOpaquePaletteSpanWithDepth. Its depth comparison
+                            // is WORD + signed less-than comparisonE, so the new constant depth must
                             // be strictly greater as int16; equality is rejected.
                             if (static_cast<std::int16_t>(constantDepth) <=
                                 static_cast<std::int16_t>(oldDepth))

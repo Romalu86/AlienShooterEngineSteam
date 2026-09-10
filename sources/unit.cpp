@@ -12,7 +12,7 @@
 
 namespace
 {
-    bool retailUcomissOrderedEqualUnit(float lhs, float rhs) noexcept
+    bool orderedUnitFloatEqual(float lhs, float rhs) noexcept
     {
         return lhs == rhs;
     }
@@ -84,12 +84,12 @@ namespace as1
         computeNextMovementPosition(&candidate.x, &candidate.y, &candidate.z);
         const std::uint32_t deltaMs = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
 
-        // Retail RotateTact quantizes the angular step to an integer.  At very
-        // high frame rates a 1 ms delta can therefore produce step == 0 on
-        // every frame, while the UNIT obstacle timer continues to count down.
-        // Preserve the retail path for every non-zero quantized step and only
-        // accumulate the sub-step angular distance that retail would discard.
-        auto rotateUnitHighFpsSafe = [this, vid, deltaMs](ANGLE targetDirection) noexcept
+        // Rotation uses an integer angular step. At very high frame rates the
+        // per-frame value may round to zero indefinitely, so preserve the
+        // discarded fractional progress and emit a one-unit turn only when it
+        // has accumulated enough distance. Normal frame-rate behavior remains
+        // on the existing RotateTact path.
+        auto rotateUnitWithSubstepCarry = [this, vid, deltaMs](ANGLE targetDirection) noexcept
         {
             SpriteHostState& state = hostState();
             const int current = directionIndex() & 0xFF;
@@ -111,8 +111,8 @@ namespace as1
             }
 
             const float rawStep = static_cast<float>(static_cast<std::int32_t>(deltaMs)) * rotationSpeed;
-            const int retailStep = static_cast<int>(rawStep + 0.5f);
-            if (retailStep != 0)
+            const int quantizedStep = static_cast<int>(rawStep + 0.5f);
+            if (quantizedStep != 0)
             {
                 state.unitTurnSubstepCarry = 0.0f;
                 state.unitTurnSubstepSign = 0;
@@ -143,9 +143,6 @@ namespace as1
 
             state.unitTurnSubstepCarry -= 1.0f;
 
-            // Feed RotateTact the smallest synthetic delta that quantizes to
-            // exactly one angular unit.  The carry above preserves the average
-            // angular speed instead of forcing one unit on every high-FPS frame.
             std::uint32_t oneStepDelta = static_cast<std::uint32_t>(0.5f / rotationSpeed);
             if (static_cast<float>(oneStepDelta) * rotationSpeed < 0.5f)
                 ++oneStepDelta;
@@ -172,7 +169,7 @@ namespace as1
             }
 
             const int turnOffset = remainingTurnTicks > 0 ? 0x40 : -0x40;
-            rotateUnitHighFpsSafe(ANGLE(static_cast<unsigned char>(directionIndex() + turnOffset)));
+            rotateUnitWithSubstepCarry(ANGLE(static_cast<unsigned char>(directionIndex() + turnOffset)));
 
             remainingTurnTicks = turnTimer();
             if (remainingTurnTicks < 0)
@@ -189,7 +186,7 @@ namespace as1
                 const int invertDirection = speed < 0.0f ? 0x80 : 0;
                 const int targetDirection = RetailDirectionFromFloatXY(
                     target->X() - X(), target->Y() - Y()).Int() + invertDirection;
-                rotateUnitHighFpsSafe(GlideDirection(targetDirection));
+                rotateUnitWithSubstepCarry(GlideDirection(targetDirection));
 
                 const DWORD flags = runtimeFlags();
                 if ((flags & SPRITE::CrossedGoalAxesMask) == SPRITE::CrossedGoalAxesMask)
@@ -197,9 +194,9 @@ namespace as1
             }
         }
 
-        if (retailUcomissOrderedEqualUnit(X(), candidate.x) &&
-            retailUcomissOrderedEqualUnit(Y(), candidate.y) &&
-            retailUcomissOrderedEqualUnit(Z(), candidate.z))
+        if (orderedUnitFloatEqual(X(), candidate.x) &&
+            orderedUnitFloatEqual(Y(), candidate.y) &&
+            orderedUnitFloatEqual(Z(), candidate.z))
             return;
 
         if (CanPlaceWithCrushAndGlide(&candidate.x, &candidate.y, &candidate.z) == nullptr)

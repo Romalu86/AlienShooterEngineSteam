@@ -61,30 +61,30 @@ namespace as1 { namespace steam
 
         struct SteamContext
         {
-            void* client = nullptr;             // +0x00
-            void* user = nullptr;               // +0x04
-            void* friends = nullptr;            // +0x08
-            void* utils = nullptr;              // +0x0C
-            void* matchMaking = nullptr;        // +0x10
-            void* userStats = nullptr;          // +0x14
-            void* apps = nullptr;               // +0x18
-            void* matchMakingServers = nullptr; // +0x1C
-            void* networking = nullptr;         // +0x20
-            void* remoteStorage = nullptr;      // +0x24
-            void* screenshots = nullptr;        // +0x28
-            void* http = nullptr;               // +0x2C
-            void* unifiedMessages = nullptr;    // +0x30
-            void* controller = nullptr;         // +0x34
-            void* ugc = nullptr;                // +0x38
-            void* appList = nullptr;            // +0x3C
-            void* music = nullptr;              // +0x40
-            void* musicRemote = nullptr;        // +0x44
-            void* htmlSurface = nullptr;        // +0x48
-            void* inventory = nullptr;          // +0x4C
-            void* video = nullptr;              // +0x50
+            void* client = nullptr;
+            void* user = nullptr;
+            void* friends = nullptr;
+            void* utils = nullptr;
+            void* matchMaking = nullptr;
+            void* userStats = nullptr;
+            void* apps = nullptr;
+            void* matchMakingServers = nullptr;
+            void* networking = nullptr;
+            void* remoteStorage = nullptr;
+            void* screenshots = nullptr;
+            void* http = nullptr;
+            void* unifiedMessages = nullptr;
+            void* controller = nullptr;
+            void* ugc = nullptr;
+            void* appList = nullptr;
+            void* music = nullptr;
+            void* musicRemote = nullptr;
+            void* htmlSurface = nullptr;
+            void* inventory = nullptr;
+            void* video = nullptr;
         };
 #if defined(_M_IX86)
-                                                                                    
+
 #endif
 
         template <typename Ret, typename... Args>
@@ -194,10 +194,10 @@ namespace as1 { namespace steam
         };
 #pragma pack(pop)
 
-                                                                                                     
-                                                                                                                 
-                                                                                                           
-                                                                                           
+
+
+
+
 
         class LeaderboardState;
 
@@ -408,11 +408,11 @@ namespace as1 { namespace steam
         LeaderboardState g_leaderboards{};
 
 #if defined(_M_IX86)
-                                                                                                                     
-                                                                                                           
-                                                                                                                   
-                                                                                                                   
-                                                                                                             
+
+
+
+
+
 #endif
 
         struct RetailCodepointMap
@@ -976,7 +976,6 @@ namespace as1 { namespace steam
             if (directory.empty())
                 directory = "Saves";
 #ifdef _WIN32
-            // This is the game's normal root save directory, not a new per-user folder.
             (void)::CreateDirectoryA(directory.c_str(), nullptr);
 #endif
             return directory;
@@ -1020,7 +1019,7 @@ namespace as1 { namespace steam
 
             std::FILE* const file = std::fopen(g_retailStatsPath.c_str(), "rb");
             if (!file)
-                return true; // First launch is a valid empty state.
+                return true;
 
             char magic[sizeof(kRetailStatsMagic)]{};
             std::uint32_t version = 0;
@@ -1271,7 +1270,10 @@ namespace as1 { namespace steam
             (void)saveRetailStats();
     }
 
-    void ActivateStore(int appId) { (void)appId; }
+    void ActivateStore(int appId)
+    {
+        (void)appId;
+    }
 
     void InitLeaderboards(const char* names)
     {
@@ -1289,8 +1291,7 @@ namespace as1 { namespace steam
         }
 
         g_retailLeaderboardNames[name] = true;
-        // Steam call uses KeepBest (method 1), so the offline backend mirrors it.
-        auto it = g_retailLeaderboards.find(name);
+        const auto it = g_retailLeaderboards.find(name);
         if (it == g_retailLeaderboards.end() || score > it->second)
             g_retailLeaderboards[name] = static_cast<std::int32_t>(score);
         g_retailLastUploadRank = 1;
@@ -1303,9 +1304,6 @@ namespace as1 { namespace steam
         if (!name || !*name || count <= 0)
             return -2;
 
-        // Retail has no network ranking. Return the local player as a completed
-        // one-entry leaderboard instead of leaving Steam-oriented scripts waiting
-        // for an async callback that can never arrive.
         if (offset > 0)
             return 0;
 
@@ -1335,7 +1333,9 @@ namespace as1 { namespace steam
         return g_retailDownloadedScores[static_cast<std::size_t>(index)];
     }
 
-    int LastUploadRank() noexcept { return g_retailLastUploadRank; }
+    int LastUploadRank() noexcept
+    {
+        return g_retailLastUploadRank;
+    }
 } }
 #endif
-

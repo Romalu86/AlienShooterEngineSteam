@@ -342,7 +342,7 @@ namespace as1 { namespace thirdparty { namespace xiph2003
             return floorLookupGainTable[value];
         }
 
-        static int retailFistp(double value)
+        static int roundDoubleToInt32(double value)
         {
             return static_cast<int>(std::lrint(value));
         }
@@ -350,7 +350,7 @@ namespace as1 { namespace thirdparty { namespace xiph2003
         double vorbisCosLookup(float value)
         {
             const double scaled = static_cast<double>(value) * 40.74366592;
-            const int index = retailFistp(scaled - 0.5);
+            const int index = roundDoubleToInt32(scaled - 0.5);
             return static_cast<double>(cosineLookupTable[index + 1] - cosineLookupTable[index])
                 * (scaled - static_cast<double>(index))
                 + static_cast<double>(cosineLookupTable[index]);
@@ -359,7 +359,7 @@ namespace as1 { namespace thirdparty { namespace xiph2003
         double vorbisInverseSqrtLookup(float value)
         {
             const double scaled = static_cast<double>(value) * 64.0 - 32.0;
-            const int index = retailFistp(scaled - 0.5);
+            const int index = roundDoubleToInt32(scaled - 0.5);
             return static_cast<double>(inverseSqrtLookupTable[index + 1] - inverseSqrtLookupTable[index])
                 * (scaled - static_cast<double>(index))
                 + static_cast<double>(inverseSqrtLookupTable[index]);
@@ -373,7 +373,7 @@ namespace as1 { namespace thirdparty { namespace xiph2003
         double vorbisFromDbLookup(float value)
         {
             const double scaled = static_cast<double>(value) * -8.0 - 0.5;
-            const int index = retailFistp(scaled);
+            const int index = roundDoubleToInt32(scaled);
             if (index < 0)
                 return 1.0;
             if (index >= 1120)

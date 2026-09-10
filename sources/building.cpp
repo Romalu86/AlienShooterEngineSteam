@@ -7,6 +7,8 @@
 
 #include <cmath>
 #include <cstdlib>
+#include <xmmintrin.h>
+#include <emmintrin.h>
 
 namespace as1
 {
@@ -49,7 +51,7 @@ namespace as1
         {
             int buildNvid = argument1;
             if (buildNvid == 0)
-                buildNvid = dispatchBaseActionOpcode(0x3B, 4, 0, 0);
+                buildNvid = dispatchVirtualAction(0x3Bu, 4, 0, 0);
             if (buildNvid > 0 && (runtimeFlags() & SPRITE::CommandBitsMask) != 0u)
                 return 0;
             MAP* const map = mapOwner();
@@ -80,6 +82,7 @@ namespace as1
                 actionTimer() != 0u || !buildVid)
                 return 0;
 
+            int nextAnimation = 1;
             float buildX = static_cast<float>(m_buildPositionX);
             float buildY = static_cast<float>(m_buildPositionY);
             if (m_buildPositionX == 0 && m_buildPositionY == 0)
@@ -89,13 +92,28 @@ namespace as1
             }
             if (m_buildPositionX < 0)
             {
-                const int radius = -m_buildPositionX;
-                buildX = X() + static_cast<float>(radius - 2 * (std::rand() % (radius + 1)));
+                const int divisor = 1 - m_buildPositionX;
+                const int doubledRemainder = 2 * (std::rand() % divisor);
+                __m128 value = _mm_sub_ss(
+                    _mm_set_ss(X()),
+                    _mm_cvtepi32_ps(_mm_cvtsi32_si128(m_buildPositionX)));
+                value = _mm_sub_ss(
+                    value,
+                    _mm_cvtepi32_ps(_mm_cvtsi32_si128(doubledRemainder)));
+                buildX = _mm_cvtss_f32(value);
             }
             if (m_buildPositionY < 0)
             {
-                const int radius = -m_buildPositionY;
-                buildY = Y() + static_cast<float>(radius - 2 * (std::rand() % (radius + 1)));
+                const int divisor = 1 - m_buildPositionY;
+                nextAnimation = divisor;
+                const int doubledRemainder = 2 * (std::rand() % divisor);
+                __m128 value = _mm_sub_ss(
+                    _mm_set_ss(Y()),
+                    _mm_cvtepi32_ps(_mm_cvtsi32_si128(m_buildPositionY)));
+                value = _mm_sub_ss(
+                    value,
+                    _mm_cvtepi32_ps(_mm_cvtsi32_si128(doubledRemainder)));
+                buildY = _mm_cvtss_f32(value);
             }
 
             if (GlobalHashQueryCellCollisionByVid(*mapOwner(), buildVid, buildX, buildY, Z()) != nullptr)
@@ -106,11 +124,11 @@ namespace as1
                 buildVid, VECTOR{buildX, buildY, Z()}, Direction(), this, false);
             if (created)
             {
-                (void)dispatchBaseActionOpcode(0x4B,
+                (void)dispatchVirtualAction(0x4Bu,
                     static_cast<int>(reinterpret_cast<std::uintptr_t>(created) & 0xFFFFFFFFu), 0, 0);
             }
             m_pendingBuildVidHandle = 0;
-            ChangeAnimation(0);
+            ChangeAnimation(nextAnimation);
             return 0;
         }
 

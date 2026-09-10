@@ -13,6 +13,7 @@
 #include <new>
 #include <cmath>
 #include <limits>
+#include <xmmintrin.h>
 
 namespace as1
 {
@@ -52,6 +53,17 @@ namespace as1
                    format == 0x35545844u;
         }
 
+        std::uint32_t retailFramePointerTableBytes(std::int32_t frameCount) noexcept
+        {
+            // The game logic: signed extension frameCount; unsigned 32-bit multiplication by 4;
+            // overflow detection saturates any 32-bit overflow to 0xFFFFFFFF.
+            const std::uint64_t product =
+                static_cast<std::uint64_t>(static_cast<std::uint32_t>(frameCount)) * 4u;
+            return product > 0xFFFFFFFFull
+                ? 0xFFFFFFFFu
+                : static_cast<std::uint32_t>(product);
+        }
+
         float interpolateSurfaceEffectCurve(const VID_SURFACE* owner,
                                             float position,
                                             int baseOffset) noexcept
@@ -75,13 +87,18 @@ namespace as1
             return (second - first) * (position - static_cast<float>(segment)) + first;
         }
 
-        int surfaceRetailCvttss2si(float value) noexcept
+        int truncateSurfaceFloatToInt32(float value) noexcept
         {
             if (!std::isfinite(value) ||
                 value < static_cast<float>(std::numeric_limits<std::int32_t>::min()) ||
                 value >= 2147483648.0f)
                 return std::numeric_limits<std::int32_t>::min();
             return static_cast<int>(std::trunc(value));
+        }
+
+        float multiplySurfaceFloat(float lhs, float rhs) noexcept
+        {
+            return _mm_cvtss_f32(_mm_mul_ss(_mm_set_ss(lhs), _mm_set_ss(rhs)));
         }
 
 
@@ -183,13 +200,11 @@ namespace as1
 
     void VID_SURFACE::Load(RESOURCE* globalRes)
     {
-        if (!globalRes)
-            return;
-
+        // The game logic dereferences the RESOURCE argument directly.
         globalRes->read(&m_surfaceSourceFormat, sizeof(m_surfaceSourceFormat));
 
         const int frameCount = static_cast<int>(static_cast<std::int16_t>(totalFrames()));
-        const std::uint32_t tableBytes32 = static_cast<std::uint32_t>(frameCount * 4);
+        const std::uint32_t tableBytes32 = retailFramePointerTableBytes(frameCount);
         const std::size_t tableBytes = static_cast<std::size_t>(tableBytes32);
         m_surfaceTextureOwners = static_cast<BASE_TEXTURE**>(::operator new(tableBytes));
         m_surfaceTexcoordOwners = static_cast<VID_TEXCOOR**>(::operator new(tableBytes));
@@ -299,55 +314,44 @@ namespace as1
                 static_cast<int>(indexCount));
             m_surfaceTexcoordOwners[frame] = texcoor;
 
-            if (texcoor)
+            // The game logic immediately calls through the newly-created
+            // VID_TEXCOOR and its lock result. The normal path
+            // added OOM/lock-null stream-preservation fallbacks that are not in retail.
+            VID_TEXCOOR_VERTEX* dstVertex = texcoor->lockVertexBuffer();
+            for (int vertex = 0; vertex < static_cast<int>(vertexCount); ++vertex)
             {
-                VID_TEXCOOR_VERTEX* dstVertex = texcoor->lockVertexBuffer();
-                for (int vertex = 0; vertex < static_cast<int>(vertexCount); ++vertex)
-                {
-                    std::int16_t screenX = 0;
-                    std::int16_t screenY = 0;
-                    std::int16_t depthCode = 0;
-                    std::int16_t texU = 0;
-                    std::int16_t texV = 0;
-                    globalRes->read(&screenX, sizeof(screenX));
-                    globalRes->read(&screenY, sizeof(screenY));
-                    globalRes->read(&depthCode, sizeof(depthCode));
-                    globalRes->read(&texU, sizeof(texU));
-                    globalRes->read(&texV, sizeof(texV));
+                std::int16_t screenX = 0;
+                std::int16_t screenY = 0;
+                std::int16_t depthCode = 0;
+                std::int16_t texU = 0;
+                std::int16_t texV = 0;
+                globalRes->read(&screenX, sizeof(screenX));
+                globalRes->read(&screenY, sizeof(screenY));
+                globalRes->read(&depthCode, sizeof(depthCode));
+                globalRes->read(&texU, sizeof(texU));
+                globalRes->read(&texV, sizeof(texV));
 
-                    if (dstVertex)
-                    {
-                        dstVertex[vertex].x = static_cast<float>(screenX);
-                        dstVertex[vertex].y =
-                            static_cast<float>(screenY) * (5793.0f / 4096.0f);
-                        dstVertex[vertex].z =
-                            static_cast<float>(static_cast<int>(depthCode) - 1024) * 0.125f;
-                        dstVertex[vertex].u = texture && texture->width() != 0
-                            ? (static_cast<float>(texU) + 0.5f) / static_cast<float>(texture->width())
-                            : 0.0f;
-                        dstVertex[vertex].v = texture && texture->height() != 0
-                            ? (static_cast<float>(texV) + 0.5f) / static_cast<float>(texture->height())
-                            : 0.0f;
-                    }
-                }
-                texcoor->unlockVertexBuffer();
-
-                if (indexCount != 0u)
-                {
-                    WORD* dstIndex = texcoor->lockIndexBuffer();
-                    if (dstIndex)
-                        globalRes->read(dstIndex, static_cast<unsigned>(indexCount * sizeof(WORD)));
-                    texcoor->unlockIndexBuffer();
-                }
+                dstVertex[vertex].x = static_cast<float>(screenX);
+                // this code path performs both single-precision multiplication operations explicitly.
+                float projectedY = multiplySurfaceFloat(static_cast<float>(screenY), 5793.0f);
+                projectedY = multiplySurfaceFloat(projectedY, 1.0f / 4096.0f);
+                dstVertex[vertex].y = projectedY;
+                dstVertex[vertex].z =
+                    static_cast<float>(static_cast<int>(depthCode) - 1024) * 0.125f;
+                // Retail performs single-precision division even for a zero texture dimension; it does
+                // not replace the result with a synthetic zero.
+                dstVertex[vertex].u =
+                    (static_cast<float>(texU) + 0.5f) / static_cast<float>(texture->width());
+                dstVertex[vertex].v =
+                    (static_cast<float>(texV) + 0.5f) / static_cast<float>(texture->height());
             }
-            else
+            texcoor->unlockVertexBuffer();
+
+            if (indexCount != 0u)
             {
-                // Preserve stream position even if mesh allocation failed.
-                const std::size_t vertexBytes = static_cast<std::size_t>(vertexCount) * 10u;
-                const std::size_t indexBytes = static_cast<std::size_t>(indexCount) * sizeof(WORD);
-                std::vector<BYTE> discard(vertexBytes + indexBytes);
-                if (!discard.empty())
-                    globalRes->read(discard.data(), static_cast<unsigned>(discard.size()));
+                WORD* dstIndex = texcoor->lockIndexBuffer();
+                globalRes->read(dstIndex, static_cast<unsigned>(indexCount * sizeof(WORD)));
+                texcoor->unlockIndexBuffer();
             }
 
             globalRes->GoNextSub(RESOURCE::ResTypes::DATA);
@@ -382,9 +386,9 @@ namespace as1
                 return;
             }
 
-            const int screenX = surfaceRetailCvttss2si(projectedX);
-            const int screenY = surfaceRetailCvttss2si(projectedY);
-            const int zInt = surfaceRetailCvttss2si(sprite->Z());
+            const int screenX = truncateSurfaceFloatToInt32(projectedX);
+            const int screenY = truncateSurfaceFloatToInt32(projectedY);
+            const int zInt = truncateSurfaceFloatToInt32(sprite->Z());
             const WORD* const depth = graph->softwareDepthBuffer();
             const int pitch = graph->softwareDepthPitch();
             const int depthLimit = static_cast<int>(

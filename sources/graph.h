@@ -267,10 +267,10 @@ namespace as1
         float viewportRight() const noexcept { return m_viewportRight; }
         float viewportTop() const noexcept { return m_viewportTop; }
         float viewportBottom() const noexcept { return m_viewportBottom; }
-        double getViewportLeft() const noexcept; // [GRAPH+0x258] left
-        double getViewportRight() const noexcept; // [GRAPH+0x25C] right
-        double getViewportTop() const noexcept; // [GRAPH+0x260] top
-        double getViewportBottom() const noexcept; // [GRAPH+0x264] bottom
+        double getViewportLeft() const noexcept;
+        double getViewportRight() const noexcept;
+        double getViewportTop() const noexcept;
+        double getViewportBottom() const noexcept;
         void rawSetSoftwareClipBounds(int left, int top, int right, int bottom) noexcept
         {
             g_softwareClipLeft = left;
@@ -338,9 +338,11 @@ namespace as1
         float cameraX() const;
         float cameraY() const;
 
-        // MAP::startLoadMap calls GRAPH::LoadParameters before reading HEAD.
-        // AS1 GRPH payload layout is kept readable here: environment, gamma pair, wind, optional sunlight.
+        // The game has two distinct graph-parameter readers.  The normal GRPH reader
+        // (this code path) consumes the current GRPH payload; the legacy reader
+        // (this code path) consumes the compact tail at the current position in HEAD.
         void LoadParameters(RESOURCE* map);
+        void LoadLegacyParameters(RESOURCE* map);
 
         int SizeX() const { return static_cast<int>(m_sizeX); }
         int SizeY() const { return static_cast<int>(m_sizeY); }
@@ -400,6 +402,7 @@ namespace as1
         static const char* D3DFormatToString(DWORD format);
 
     private:
+        friend class MAP;
         friend class VID;
         friend class VID_HARDWARE_Z;
 

@@ -17,7 +17,7 @@ namespace as1
 {
     namespace
     {
-        int civFtolLow32(long double value) noexcept
+        int civConvertFloatToInt32(long double value) noexcept
         {
             if (!std::isfinite(value) ||
                 value < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
@@ -27,16 +27,16 @@ namespace as1
                 static_cast<std::uint64_t>(static_cast<std::int64_t>(std::trunc(value)))));
         }
 
-        int civFsubFtolLow32(float lhs, float rhs) noexcept
+        int civSubtractAndConvertToInt32(float lhs, float rhs) noexcept
         {
-            return civFtolLow32(static_cast<long double>(lhs) - static_cast<long double>(rhs));
+            return civConvertFloatToInt32(static_cast<long double>(lhs) - static_cast<long double>(rhs));
         }
 
-        int civFsubStoreF32FtolLow32(float lhs, float rhs) noexcept
+        int civSubtractRoundedFloatAndConvertToInt32(float lhs, float rhs) noexcept
         {
             const float rounded = static_cast<float>(
                 static_cast<long double>(lhs) - static_cast<long double>(rhs));
-            return civFtolLow32(static_cast<long double>(rounded));
+            return civConvertFloatToInt32(static_cast<long double>(rounded));
         }
     }
     CIV_ROBOT::CIV_ROBOT(MAP* owner, VID* vid, const VECTOR& xyz, const ANGLE& direction, SPRITE* parent)
@@ -138,8 +138,12 @@ namespace as1
 
         VID* const vid = Vid();
         const std::uint32_t elapsed = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
-        const std::uint32_t turnDelta = std::max(
-            elapsed, static_cast<std::uint32_t>(vid->defaultFrameSpeed()));
+        const auto currentTurnDelta = [this, vid, elapsed]() noexcept -> std::uint32_t {
+            return std::max(
+                elapsed,
+                static_cast<std::uint32_t>(vid->hostFrameSpeedStorage(currentAnimation())));
+        };
+        const std::uint32_t turnDelta = currentTurnDelta();
 
         int remainingTurnTicks = turnTimer();
         if (remainingTurnTicks != 0)
@@ -154,9 +158,8 @@ namespace as1
         {
             if ((runtimeFlags() & SPRITE::CommandBitsMask) == 4u)
             {
-                int desired = AngleFromXY(
-                    civFsubStoreF32FtolLow32(target->X(), X()),
-                    civFsubFtolLow32(target->Y(), Y()), nullptr).Int();
+                int desired = RetailDirectionFromFloatXY(
+                    target->X() - X(), target->Y() - Y()).Int();
                 if (Speed() < 0.0f)
                     desired = (desired - 128) & 0xFF;
                 if (RotateTact(ANGLE(static_cast<unsigned char>(desired)), turnDelta).Int() == 0)
@@ -291,9 +294,9 @@ namespace as1
                 Stop();
             if (m_retainedTargetSprite)
             {
-                const int direction = AngleFromXY(
-                    civFsubStoreF32FtolLow32(m_retainedTargetSprite->X(), X()),
-                    civFsubFtolLow32(m_retainedTargetSprite->Y(), Y()), nullptr).Int();
+                const int direction = RetailDirectionFromFloatXY(
+                    m_retainedTargetSprite->X() - X(),
+                    m_retainedTargetSprite->Y() - Y()).Int();
                 rotateLinkedChildTowardDirection(static_cast<std::uint8_t>(direction));
             }
             return 0;
@@ -318,7 +321,7 @@ namespace as1
             SPRITE* const child = childChain();
             if (!child || child->Vid() != vid->linkedVid())
                 return 0;
-            child->RotateTact(directionIndex(), turnDelta);
+            child->RotateTact(directionIndex(), currentTurnDelta());
             changeLinkedChildAnimationWhenIdle(12);
             return 0;
         }
@@ -338,7 +341,7 @@ namespace as1
             }
             SetCommand(0, nullptr);
             if ((std::rand() % 3) == 0)
-                RotateTact(std::rand() & 0xFF, turnDelta);
+                RotateTact(std::rand() & 0xFF, currentTurnDelta());
             if ((std::rand() % 10) == 0)
                 changeLinkedChildAnimationWhenIdle(11);
             else if ((std::rand() % 10) == 0)
@@ -354,9 +357,9 @@ namespace as1
             if ((runtimeFlags() & SPRITE::MovementStartedFlag) == 0u)
                 StartMove();
             if (currentAnimation() == 2 && (std::rand() % 3) == 0)
-                RotateTact(directionIndex() - 32, turnDelta);
+                RotateTact(directionIndex() - 32, currentTurnDelta());
             else if (currentAnimation() == 2 && (std::rand() % 3) == 0)
-                RotateTact(directionIndex() + 32, turnDelta);
+                RotateTact(directionIndex() + 32, currentTurnDelta());
             else
                 changeLinkedChildAnimationWhenIdle(2);
             rotateLinkedChildTowardDirection(static_cast<std::uint8_t>(directionIndex()));
@@ -402,7 +405,7 @@ namespace as1
             SPRITE* const child = childChain();
             if (!child || child->Vid() != vid->linkedVid())
                 return 0;
-            child->RotateTact(directionIndex(), turnDelta);
+            child->RotateTact(directionIndex(), currentTurnDelta());
             changeLinkedChildAnimationWhenIdle(11);
             return 0;
         }
@@ -415,15 +418,15 @@ namespace as1
                 setSpeedDirect(vid->maxSpeedValue() * 2.0f);
             if (m_retainedTargetSprite)
             {
-                const int direction = (AngleFromXY(
-                    civFsubStoreF32FtolLow32(m_retainedTargetSprite->X(), X()),
-                    civFsubFtolLow32(m_retainedTargetSprite->Y(), Y()), nullptr).Int() - 128) & 0xFF;
-                RotateTact(direction, turnDelta);
+                const int direction = (RetailDirectionFromFloatXY(
+                    m_retainedTargetSprite->X() - X(),
+                    m_retainedTargetSprite->Y() - Y()).Int() - 128) & 0xFF;
+                RotateTact(direction, currentTurnDelta());
             }
             SPRITE* const child = childChain();
             if (!child || child->Vid() != vid->linkedVid())
                 return 0;
-            child->RotateTact(directionIndex(), turnDelta);
+            child->RotateTact(directionIndex(), currentTurnDelta());
             changeLinkedChildAnimationWhenIdle(11);
             return 0;
         }
@@ -436,10 +439,11 @@ namespace as1
             if (!child || child->Vid() != vid->linkedVid())
                 return 0;
             const int direction = m_retainedTargetSprite
-                ? AngleFromXY(civFsubStoreF32FtolLow32(m_retainedTargetSprite->X(), X()),
-                              civFsubFtolLow32(m_retainedTargetSprite->Y(), Y()), nullptr).Int()
+                ? RetailDirectionFromFloatXY(
+                      m_retainedTargetSprite->X() - X(),
+                      m_retainedTargetSprite->Y() - Y()).Int()
                 : directionIndex();
-            child->RotateTact(direction, turnDelta);
+            child->RotateTact(direction, currentTurnDelta());
             changeLinkedChildAnimationWhenIdle((std::rand() % 3) != 0 ? 9 : 11);
             return 0;
         }
@@ -452,10 +456,11 @@ namespace as1
             if (!child || child->Vid() != vid->linkedVid())
                 return 0;
             const int direction = m_retainedTargetSprite
-                ? AngleFromXY(civFsubStoreF32FtolLow32(m_retainedTargetSprite->X(), X()),
-                              civFsubFtolLow32(m_retainedTargetSprite->Y(), Y()), nullptr).Int()
+                ? RetailDirectionFromFloatXY(
+                      m_retainedTargetSprite->X() - X(),
+                      m_retainedTargetSprite->Y() - Y()).Int()
                 : directionIndex();
-            child->RotateTact(direction, turnDelta);
+            child->RotateTact(direction, currentTurnDelta());
             changeLinkedChildAnimationWhenIdle(6);
             return 0;
         }
@@ -510,9 +515,9 @@ namespace as1
             !(candidate.y >= 0.0f) || !(candidate.y < map->SizeY()))
         {
             dispatchVirtualAction(ActionCode::ACT_PATH_LIMIT,
-                                     civFsubFtolLow32(candidate.x, X()),
-                                     civFsubFtolLow32(candidate.y, Y()),
-                                     civFsubFtolLow32(candidate.z, Z()));
+                                     civSubtractAndConvertToInt32(candidate.x, X()),
+                                     civSubtractAndConvertToInt32(candidate.y, Y()),
+                                     civSubtractAndConvertToInt32(candidate.z, Z()));
             return;
         }
 
@@ -541,9 +546,9 @@ namespace as1
 
             if (SpriteHashDepoCanCreateUnitFilter(collision) && behaviorState() == 14u)
             {
-                const int dx = civFsubStoreF32FtolLow32(X(), collision->X());
-                const int dy = civFsubFtolLow32(Y(), collision->Y());
-                const std::uint8_t desired = static_cast<std::uint8_t>(AngleFromXY(dx, dy, nullptr).Int());
+                const std::uint8_t desired = static_cast<std::uint8_t>(
+                    RetailDirectionFromFloatXY(
+                        X() - collision->X(), Y() - collision->Y()).Int());
                 const std::uint8_t opposite = static_cast<std::uint8_t>(collision->directionIndex() - 128);
                 const std::uint8_t d1 = static_cast<std::uint8_t>(desired - opposite);
                 const std::uint8_t d2 = static_cast<std::uint8_t>(opposite - desired);
@@ -566,18 +571,26 @@ namespace as1
         }
 
     blocked:
-        dispatchVirtualAction(ActionCode::ACT_PATH_BLOCK,
-                                 civFsubFtolLow32(candidate.x, X()),
-                                 civFsubFtolLow32(candidate.y, Y()),
-                                 civFsubFtolLow32(candidate.z, Z()));
+        // The game logic is CIV-specific.  It does not delegate to the
+        // generic ACT_PATH_BLOCK axis-slide behavior.
+        setSpeedDirect(0.0f);
+        if (turnTimer() == 0)
+            setTurnTimer((std::rand() % 2) != 0 ? 10 : -10);
+        if ((runtimeFlags() & SPRITE::CommandBitsMask) == 4u &&
+            (std::rand() % 9) == 0)
+        {
+            Stop();
+            setBehaviorState(0u);
+        }
     }
 
     SPRITE* CIV_ROBOT::findNearbyEligibleTarget() noexcept
     {
         SPRITE_COLLECTOR_HASH_MAP* const hash = GlobalSpriteHashMap();
         SPRITE* selected = nullptr;
-        for (SPRITE* candidate = hash->firstSpriteInBox(X() - 200.0f, Y() - 133.0f,
-                                                               X() + 200.0f, Y() + 133.0f);
+        for (SPRITE* candidate = hash->firstSpriteInBox(
+                 X() - 200.0f, Y() - 133.0f,
+                 X() + 200.0f, (Z() + Y()) + 133.0f);
              candidate;
              candidate = hash->nextSpriteInBox())
         {
@@ -635,8 +648,10 @@ namespace as1
         if (result < child->currentFrameEnd())
             return result;
 
-        const std::uint32_t elapsed = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
-        std::uint32_t budget = static_cast<std::uint32_t>(ownerVid->defaultFrameSpeed());
+        const std::uint32_t elapsed =
+            core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
+        std::uint32_t budget = static_cast<std::uint32_t>(
+            ownerVid->hostFrameSpeedStorage(currentAnimation()));
         if (elapsed > budget)
             budget = elapsed;
         return child->RotateTact(ANGLE(static_cast<unsigned char>(direction)), budget).Int();

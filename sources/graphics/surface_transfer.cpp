@@ -32,7 +32,7 @@ namespace as1
 
 #if defined(_MSC_VER) && defined(_M_IX86)
     // The generated import library names the real DLL exports without stdcall
-    // decoration.  The x86 compiler references decorated __imp__ symbols;
+    // decoration.  The 32-bit compiler references decorated __imp__ symbols;
     // alias them to the undecorated import pointers while preserving WINAPI
     // calling convention at the call site.
 #pragma comment(linker, "/alternatename:__imp__D3DXLoadSurfaceFromMemory@40=__imp__D3DXLoadSurfaceFromMemory")

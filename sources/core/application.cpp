@@ -472,8 +472,12 @@ namespace as1 { namespace core
     {
         if (index < 0 || static_cast<std::size_t>(index) >= kCapacity)
             return;
+
         g_applicationVidSlots[static_cast<std::size_t>(index)] = vid;
 #ifdef _WIN32
+        // Keep the original in-object table synchronized for legacy ids only.
+        // Extended ids live in the host-side table so the physical application
+        // layout remains unchanged.
         if (static_cast<std::size_t>(index) < kRetailCapacity)
         {
             if (void* const owner = ApplicationPhysicalOwner())
@@ -1052,7 +1056,7 @@ namespace as1 { namespace core
 
     namespace
     {
-        int drawPassFtolLow32(float value) noexcept
+        int drawPassConvertFloatToInt32(float value) noexcept
         {
             const long double d = static_cast<long double>(value);
             if (!std::isfinite(d) || d >= 9223372036854775808.0L || d < -9223372036854775808.0L)
@@ -1061,7 +1065,7 @@ namespace as1 { namespace core
             return static_cast<int>(static_cast<std::uint32_t>(converted));
         }
 
-        int drawPassFmulAddFtolLow32(float value, float scale, float addend) noexcept
+        int drawPassMultiplyAddAndConvertToInt32(float value, float scale, float addend) noexcept
         {
             const long double d = static_cast<long double>(value) * static_cast<long double>(scale) + static_cast<long double>(addend);
             if (!std::isfinite(d) || d >= 9223372036854775808.0L || d < -9223372036854775808.0L)
@@ -1070,7 +1074,7 @@ namespace as1 { namespace core
             return static_cast<int>(static_cast<std::uint32_t>(converted));
         }
 
-        int drawPassFsubFtolLow32(float lhs, float rhs) noexcept
+        int drawPassSubtractAndConvertToInt32(float lhs, float rhs) noexcept
         {
             const long double d = static_cast<long double>(lhs) - static_cast<long double>(rhs);
             if (!std::isfinite(d) || d >= 9223372036854775808.0L || d < -9223372036854775808.0L)
@@ -1248,15 +1252,13 @@ namespace as1 { namespace core
         }
 
         SPRITE* selected = nullptr;
-        auto lessOrUnordered = [](long double lhs, long double rhs) noexcept -> bool
-        {
-            return lhs < rhs || std::isnan(lhs) || std::isnan(rhs);
-        };
         auto preferCandidate = [&](SPRITE* candidate) noexcept
         {
+            // The game logic compares the already-stored binary32 VID sizes with
+            // floating-point comparison and only replaces on ordered greater-than of the old candidate.
             if (!selected ||
-                lessOrUnordered(candidate->Vid()->sizeX(), selected->Vid()->sizeX()) ||
-                lessOrUnordered(candidate->Vid()->sizeY(), selected->Vid()->sizeY()))
+                selected->Vid()->sizeX() > candidate->Vid()->sizeX() ||
+                selected->Vid()->sizeY() > candidate->Vid()->sizeY())
             {
                 selected = candidate;
             }
@@ -1282,19 +1284,21 @@ namespace as1 { namespace core
         auto standardHit = [&](SPRITE* candidate) noexcept -> bool
         {
             VID* const candidateVid = candidate->Vid();
-            const long double centerX = candidate->X();
-            const long double halfX = candidateVid->halfSizeX();
-            const long double queryX = x;
-            if (centerX - halfX > queryX || queryX > centerX + halfX)
+            // The game logic keeps the rectangle math in binary32.  ordered float comparison
+            // makes X inclusive and rejects unordered; ordered float comparison makes Y strict
+            // and also rejects unordered.
+            const float centerX = candidate->X();
+            const float halfX = candidateVid->halfSizeX();
+            const float lowerX = centerX - halfX;
+            const float upperX = centerX + halfX;
+            if (!(x >= lowerX) || !(upperX >= x))
                 return false;
 
-            const long double baseY = static_cast<long double>(candidate->Y()) - candidate->Z();
-            const long double queryY = y;
-            const long double lower = baseY - candidateVid->sizeZ() - candidateVid->halfSizeY();
-            const long double upper = baseY + candidateVid->halfSizeY();
-            // lower FCOMP uses test AH,1 (less OR unordered); upper FCOMP uses
-            // test AH,41h and accepts only ordered greater-than.
-            return lessOrUnordered(lower, queryY) && upper > queryY;
+            const float baseY = candidate->Y() - candidate->Z();
+            const float halfY = candidateVid->halfSizeY();
+            const float lowerY = baseY - candidateVid->sizeZ() - halfY;
+            const float upperY = baseY + halfY;
+            return y > lowerY && upperY > y;
         };
 
         auto regionAwareHit = [&](SPRITE* candidate) noexcept -> bool
@@ -1303,20 +1307,20 @@ namespace as1 { namespace core
             if (candidateVid->spriteClassId() == 23u)
             {
                 const REGION* const region = static_cast<const REGION*>(candidate);
-                const long double centerX = candidate->X();
-                const long double halfX = static_cast<long double>(region->regionWidth()) * 0.5L;
-                const long double queryX = x;
-                if (centerX - halfX > queryX || queryX > centerX + halfX)
+                // The game logic is the REGION counterpart of this code path and
+                // uses the same float/floating-point comparison boundary rules with region dimensions.
+                const float centerX = candidate->X();
+                const float halfX = region->regionWidth() * 0.5f;
+                const float lowerX = centerX - halfX;
+                const float upperX = centerX + halfX;
+                if (!(x >= lowerX) || !(upperX >= x))
                     return false;
 
-                const long double baseY = static_cast<long double>(candidate->Y()) - candidate->Z();
-                const long double halfY = static_cast<long double>(region->regionHeight()) * 0.5L;
-                const long double queryY = y;
-                const long double lower = baseY - candidateVid->sizeZ() - halfY;
-                const long double upper = baseY + halfY;
-                // Region path compares queryY against upper with another
-                // test AH,1, so unordered is accepted on both Y boundaries.
-                return lessOrUnordered(lower, queryY) && lessOrUnordered(queryY, upper);
+                const float baseY = candidate->Y() - candidate->Z();
+                const float halfY = region->regionHeight() * 0.5f;
+                const float lowerY = baseY - candidateVid->sizeZ() - halfY;
+                const float upperY = baseY + halfY;
+                return y > lowerY && upperY > y;
             }
             return standardHit(candidate);
         };
@@ -1357,7 +1361,9 @@ namespace as1 { namespace core
             }
 
             int firstPass = 0;
-            int endPass = 13;
+            // Retail generic filtered searches use an exclusive upper pass of 0x10:
+            // buckets 0..15.  Bucket 16 remains reachable through an explicit nvid layer.
+            int endPass = ApplicationDrawDispatcherState::PassCount - 1;
             if (vidQuery)
             {
                 firstPass = requestedVid->renderLayer();
@@ -1497,18 +1503,11 @@ namespace as1 { namespace core
         {
             if (candidate->childBacklink() != nullptr || !passesFilter(candidate))
                 return;
-            // Non-hash routes keep the float operands live in x87 and use
-            // min(abs(dx),abs(dy))*0.5 + max(...).  FCOMP/test AH,41h takes
-            // the first branch for <= and unordered.
-            const long double dx = std::fabs(
-                static_cast<long double>(x) - static_cast<long double>(candidate->X()));
-            const long double dy = std::fabs(
-                static_cast<long double>(y) - static_cast<long double>(candidate->Y()));
-            const long double metric =
-                (dx <= dy || std::isnan(dx) || std::isnan(dy))
-                    ? dx * 0.5L + dy
-                    : dx + dy * 0.5L;
-            acceptMetric(candidate, metric);
+            // The generic bucket route in The game logic duplicates this code path
+            // with single-precision subtraction/single-precision multiplication/single-precision addition, so it has the same binary32 rounding.
+            const float dx = x - candidate->X();
+            const float dy = y - candidate->Y();
+            acceptMetric(candidate, as1::approximatePlanarDistance(dx, dy));
         };
 
         if ((filter & 0x8000) != 0)
@@ -1548,7 +1547,9 @@ namespace as1 { namespace core
             }
 
             int firstPass = 0;
-            int endPass = 13;
+            // Retail generic filtered searches use an exclusive upper pass of 0x10:
+            // buckets 0..15.  Bucket 16 remains reachable through an explicit nvid layer.
+            int endPass = ApplicationDrawDispatcherState::PassCount - 1;
             if (vidQuery)
             {
                 firstPass = requestedVid->renderLayer();
@@ -1590,9 +1591,9 @@ namespace as1 { namespace core
         {
             GRAPH* const graph = GRAPH::CurrentGraph();
             constexpr float half = 0.5f;
-            const int viewCenterX = drawPassFmulAddFtolLow32(
+            const int viewCenterX = drawPassMultiplyAddAndConvertToInt32(
                 graph->screenWidth(), half, state.cameraShiftX());
-            const int viewCenterY = drawPassFmulAddFtolLow32(
+            const int viewCenterY = drawPassMultiplyAddAndConvertToInt32(
                 graph->screenHeight(), half, state.cameraShiftY());
 
             cursor = state.drawPassBucket(pass).count();
@@ -1602,14 +1603,14 @@ namespace as1 { namespace core
                 if (spriteVisibleForDrawPass(sprite))
                 {
                     const std::uint32_t xMaskValue =
-                        static_cast<std::uint32_t>(drawPassFtolLow32(sprite->X())) -
+                        static_cast<std::uint32_t>(drawPassConvertFloatToInt32(sprite->X())) -
                         static_cast<std::uint32_t>(viewCenterX) + 0x400u;
 
                     bool draw = false;
                     if ((xMaskValue & 0xFFFFF800u) != 0u)
                     {
                         const std::int32_t topYDelta = static_cast<std::int32_t>(
-                            static_cast<std::uint32_t>(drawPassFtolLow32(sprite->Y())) -
+                            static_cast<std::uint32_t>(drawPassConvertFloatToInt32(sprite->Y())) -
                             static_cast<std::uint32_t>(viewCenterY));
                         if (topYDelta >= 0x200)
                             draw = true;
@@ -1617,7 +1618,7 @@ namespace as1 { namespace core
                     else
                     {
                         const std::uint32_t baseYMaskValue =
-                            static_cast<std::uint32_t>(drawPassFsubFtolLow32(sprite->Y(), sprite->Z())) -
+                            static_cast<std::uint32_t>(drawPassSubtractAndConvertToInt32(sprite->Y(), sprite->Z())) -
                             static_cast<std::uint32_t>(viewCenterY) + 0x200u;
                         if ((baseYMaskValue & 0xFFFFFC00u) == 0u)
                         {
@@ -1626,7 +1627,7 @@ namespace as1 { namespace core
                         else
                         {
                             const std::int32_t topYDelta = static_cast<std::int32_t>(
-                                static_cast<std::uint32_t>(drawPassFtolLow32(sprite->Y())) -
+                                static_cast<std::uint32_t>(drawPassConvertFloatToInt32(sprite->Y())) -
                                 static_cast<std::uint32_t>(viewCenterY));
                             if (topYDelta >= 0x200)
                                 draw = true;

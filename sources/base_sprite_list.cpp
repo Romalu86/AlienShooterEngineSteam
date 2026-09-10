@@ -187,7 +187,7 @@ namespace as1
     {
         // Application::removeSpriteFromDrawBucket scans the selected 0x10-byte list from
         // count-1 toward zero and only nulls the matching slot.  It does not
-        // alter count/capacity and does not touch SPRITE+0x2C.
+        // alter count/capacity and does not change the sprite reference counter.
         int index = m_count - 1;
         if (index < 0)
             return index;

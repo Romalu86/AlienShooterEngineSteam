@@ -130,7 +130,7 @@ namespace as1
             return lhs == rhs || std::isnan(lhs) || std::isnan(rhs);
         }
 
-        int playerRetailCvttss2si(float value) noexcept
+        int playerTruncateFloatToInt32(float value) noexcept
         {
             if (!std::isfinite(value) ||
                 value < static_cast<float>(std::numeric_limits<std::int32_t>::min()) ||
@@ -139,14 +139,14 @@ namespace as1
             return static_cast<int>(std::trunc(value));
         }
 
-        bool playerRetailUcomissEqualOrdered(float lhs, float rhs) noexcept
+        bool playerOrderedFloatEqual(float lhs, float rhs) noexcept
         {
             // The fallthrough is ordered equality only; unordered is treated as
             // not-equal.
             return !std::isnan(lhs) && !std::isnan(rhs) && lhs == rhs;
         }
 
-        int playerRetailFtolLow32(float value) noexcept
+        int playerConvertFloatToInt32(float value) noexcept
         {
             const long double d = static_cast<long double>(value);
             if (!std::isfinite(d) ||
@@ -157,19 +157,17 @@ namespace as1
             return static_cast<int>(static_cast<std::uint32_t>(static_cast<std::uint64_t>(converted)));
         }
 
-        int playerRetailProjectedRowFtol(float spriteY, float spriteZ,
+        int playerProjectedRowToInt32(float spriteY, float spriteZ,
                                          float cameraY, float viewportTop) noexcept
         {
-            const long double value = static_cast<long double>(spriteY)
-                                    - static_cast<long double>(spriteZ)
-                                    - static_cast<long double>(cameraY)
-                                    - static_cast<long double>(viewportTop);
-            if (!std::isfinite(value) ||
-                value < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                value > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(value));
-            return static_cast<int>(static_cast<std::uint32_t>(static_cast<std::uint64_t>(converted)));
+            // The game logic keeps the projected-row numerator in binary32:
+            // single-precision subtraction(Y,Z) -> single-precision subtraction(cameraY) -> single-precision subtraction(viewportTop) -> truncating float-to-int conversion,
+            // followed by the integer signed integer division performed by the caller.  The previous
+            // Keep the calculation in single precision to preserve the intended rounding.
+            float value = spriteY - spriteZ;
+            value -= cameraY;
+            value -= viewportTop;
+            return playerTruncateFloatToInt32(value);
         }
 
         int playerImulLow32(int lhs, int rhs) noexcept
@@ -287,7 +285,7 @@ namespace as1
         m_state.base.vtable = CurrentImageBaseVtable();
 
         // The two release branches in the compiler output immediately observe
-        // the just-written zero +0x10/+0x24 slots, so no hidden side effect is
+        // the just-written zero state slots, so no hidden side effect is
         // omitted here.
         m_state.base.controlMode = controlMode;
         m_state.base.money = 1000u;
@@ -508,7 +506,7 @@ namespace as1
             SPRITE* const selected = frameList.selectedSprite();
             GRAPH* const graph = GRAPH::CurrentGraph();
             const int terrainCellStep = pathFindTerrainCellStep();
-            const int projectedRowNumerator = playerRetailProjectedRowFtol(
+            const int projectedRowNumerator = playerProjectedRowToInt32(
                 selected->Y(),
                 selected->Z(),
                 as1::core::GlobalApplicationDrawDispatcherState().cameraShiftY(),
@@ -986,7 +984,7 @@ namespace as1
         VID* const controlledVid = controlled->Vid();
         int selected = controlledVid->linkedVid()->nvid() - 0x0A;
 
-        // never mutates InputMessageState+0x04 here.  With zero wheel delta it
+        // does not mutate the input state here. With zero wheel delta it
         // also accepts the configured Prev/Next keyboard bindings via rawKeyCode.
         int delta = inputState->wheelDelta;
         if (delta == 0)
@@ -1093,6 +1091,18 @@ namespace as1
 #endif
     }
 
+    void PLAYER::dispatchReservedScriptToggleViaRetailVtable(int value) noexcept
+    {
+#if defined(_MSC_VER) && defined(_M_IX86)
+        using RetailReservedFn = void (__thiscall*)(PLAYER*);
+        void** const vtable = *reinterpret_cast<void***>(this);
+        // Action 122 selects one PLAYER callback for non-zero and another for zero.
+        reinterpret_cast<RetailReservedFn>(vtable[value != 0 ? 7 : 8])(this);
+#else
+        (void)value;
+#endif
+    }
+
     void PLAYER::processInput(as1::input::InputMessageState* inputState) noexcept
     {
         processInputGlobalListPrepass();
@@ -1111,12 +1121,12 @@ namespace as1
         if ((flags & 0x00008000u) != 0u)
         {
             // the projected Y coordinate before ACT_MOVE and converts both
-            // coordinates with CVTTSS2SI.
+            // coordinates with truncating float-to-int conversion.
             const float groundZ = MAP::Current()->sampleTerrainHeight(inputState->worldX, inputState->worldY);
             controlled->dispatchVirtualAction(
                 static_cast<std::uint32_t>(ActionCode::ACT_MOVE),
-                playerRetailCvttss2si(inputState->worldX),
-                playerRetailCvttss2si(inputState->worldY + groundZ),
+                playerTruncateFloatToInt32(inputState->worldX),
+                playerTruncateFloatToInt32(inputState->worldY + groundZ),
                 0);
         }
 
@@ -1131,8 +1141,8 @@ namespace as1
             processInputAttackWeaponPreselect(controlled);
             controlled->dispatchVirtualAction(
                 static_cast<std::uint32_t>(ActionCode::ACT_COOR_ATTACK),
-                playerRetailCvttss2si(inputState->worldX),
-                playerRetailCvttss2si(inputState->worldY),
+                playerTruncateFloatToInt32(inputState->worldX),
+                playerTruncateFloatToInt32(inputState->worldY),
                 0);
         }
 
@@ -1164,11 +1174,11 @@ namespace as1
         if (childVid != controlledVid->linkedVid())
             return;
 
-        // animations.  The previous reconstruction rotated the child anyway.
+        // animations. Child rotation is skipped for this stationary case.
         if (controlled->currentAnimation() >= 15)
             return;
 
-        const bool speedIsOrderedZero = playerRetailUcomissEqualOrdered(controlled->Speed(), 0.0f);
+        const bool speedIsOrderedZero = playerOrderedFloatEqual(controlled->Speed(), 0.0f);
         const bool movementOrSpecialFlag = !speedIsOrderedZero || (controlled->runtimeFlags() & 0x80u) != 0u;
 
         const unsigned char childByte = static_cast<unsigned char>(child->directionIndex() & 0xFF);

@@ -163,6 +163,8 @@ namespace as1 { namespace core
 
     ApplicationVidTable& GlobalApplicationVidTable() noexcept;
 
+    // Legacy filters encode VID ids below 2048 with bit 0x0800.
+    // Extended ids use a separate marker and the low 13 bits for the id.
     constexpr int EncodeVidQueryFilter(int nvid) noexcept
     {
         return nvid < static_cast<int>(ApplicationVidTable::kRetailCapacity)
@@ -389,11 +391,10 @@ namespace as1 { namespace core
 
         static int callScriptFunction(std::uint32_t applicationFlags, SCRIPT* scriptOwner, int functionIndex, int firstArgument, int secondArgument, int thirdArgument = 0);
 
-        // Application image whose flags live at +0x0C and SCRIPT at +0x16C.
+        // Dispatches through the application-owned script runtime.
         int callScriptFunctionRetail(int functionIndex, int firstArgument, int secondArgument, int thirdArgument = 0);
 
-        // Source-facing singleton wrapper. Optimized Win32 callers collapse
-        // this into a call of callScriptFunctionRetail with ECX=Application.
+        // Source-facing singleton wrapper for the application-owned script runtime.
         static int callScriptFunction(int functionIndex, int firstArgument, int secondArgument, int thirdArgument = 0);
 
         static int drawSpritePass(ApplicationDrawDispatcherState& state, int pass);

@@ -68,7 +68,7 @@ namespace as1
         std::uint32_t m_vtableToken = 0;
         int m_count = 0;                                   // +0x04
         int m_capacity = 0;                                // +0x08
-        SPRITE** m_items = nullptr;                        // +0x0C (x86)
+        SPRITE** m_items = nullptr;                        // +0x0C (32-bit)
     };
 
     class SPRITE_LIST : public SPRITE_POINTER_LIST
