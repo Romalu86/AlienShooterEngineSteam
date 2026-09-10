@@ -1,6 +1,6 @@
 # Alien Shooter Steam 1.22 source project
 
-A Win32/x86 source project focused on compatibility with the Steam 1.22 release of Alien Shooter. The current tree contains the cumulative engine, gameplay, rendering, resource-loading, save/profile and Steam integration corrections completed during the compatibility work.
+A Win32/x86 source project focused on compatibility with the Steam 1.22 release of Alien Shooter.
 
 The repository is intended for preservation, maintenance, study and non-commercial modification. It does **not** include original game data or Steam redistributable binaries.
 
@@ -9,9 +9,6 @@ The repository is intended for preservation, maintenance, study and non-commerci
 - Target: **Alien Shooter Steam 1.22**.
 - Configuration: **Release | Win32**.
 - Toolset: **MSVC v141**.
-- Verified with the v141 toolset available through modern Visual Studio installations.
-- The final cumulative build was checked in-game after the compatibility work; no new runtime regressions were observed in that test pass.
-- Compiler/runtime layout can differ from the historical Steam executable when a later v141 compiler is used. Functional compatibility is the goal; byte-for-byte executable identity is not required.
 
 ## Requirements
 
