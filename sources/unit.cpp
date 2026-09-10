@@ -12,7 +12,7 @@
 
 namespace
 {
-    bool retailUcomissOrderedEqualUnit(float lhs, float rhs) noexcept
+    bool orderedUnitFloatEqual(float lhs, float rhs) noexcept
     {
         return lhs == rhs;
     }
@@ -126,9 +126,9 @@ namespace as1
             }
         }
 
-        if (retailUcomissOrderedEqualUnit(X(), candidate.x) &&
-            retailUcomissOrderedEqualUnit(Y(), candidate.y) &&
-            retailUcomissOrderedEqualUnit(Z(), candidate.z))
+        if (orderedUnitFloatEqual(X(), candidate.x) &&
+            orderedUnitFloatEqual(Y(), candidate.y) &&
+            orderedUnitFloatEqual(Z(), candidate.z))
             return;
 
         if (CanPlaceWithCrushAndGlide(&candidate.x, &candidate.y, &candidate.z) == nullptr)

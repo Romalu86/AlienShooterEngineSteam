@@ -54,16 +54,24 @@
 #include <mmsystem.h>
 #include "d3d8.h"
 #endif
+#if defined(_MSC_VER) && defined(_M_IX86)
+#include <xmmintrin.h>
+#endif
 
 namespace as1
 {
     long double approximatePlanarDistance(float dx, float dy) noexcept
     {
-        const long double ax = std::fabs(static_cast<long double>(dx));
-        const long double ay = std::fabs(static_cast<long double>(dy));
-        if (ax <= ay)
-            return ax * 0.5L + ay;
-        return ax + ay * 0.5L;
+        // The game logic performs single-precision subtraction/double-precision widening(abs mask)/single-precision narrowing and then
+        // single-precision multiplication/single-precision addition.  Keep every arithmetic result in binary32; the original
+        // only widens the final stored float when floating-point load returns it through extended precision.
+        const float ax = std::fabs(dx);
+        const float ay = std::fabs(dy);
+        const float metric =
+            (ax <= ay || std::isnan(ax) || std::isnan(ay))
+                ? ax * 0.5f + ay
+                : ax + ay * 0.5f;
+        return static_cast<long double>(metric);
     }
 
     namespace
@@ -164,7 +172,7 @@ namespace as1
         }
 #endif
 
-        int retailFtolLow32ForMap(float value) noexcept
+        int mapConvertFloatToInt32(float value) noexcept
         {
             const long double d = static_cast<long double>(value);
             if (!std::isfinite(d) ||
@@ -175,7 +183,42 @@ namespace as1
             return static_cast<int>(static_cast<std::uint32_t>(converted));
         }
 
-        int retailFtolMulLow32ForMap(float value, float multiplier) noexcept
+        int truncateFloatToInt32ForMap(float value) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (!std::isfinite(value) || value < -2147483648.0f || value >= 2147483648.0f)
+                return static_cast<int>(0x80000000u);
+            return static_cast<int>(value);
+#endif
+        }
+
+        float retailMinssForMap(float destination, float source) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtss_f32(_mm_min_ss(_mm_set_ss(destination), _mm_set_ss(source)));
+#else
+            // single-precision minimum returns the source operand when either input is NaN.
+            if (std::isnan(destination) || std::isnan(source))
+                return source;
+            return destination < source ? destination : source;
+#endif
+        }
+
+        float retailMaxssForMap(float destination, float source) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtss_f32(_mm_max_ss(_mm_set_ss(destination), _mm_set_ss(source)));
+#else
+            // single-precision maximum returns the source operand when either input is NaN.
+            if (std::isnan(destination) || std::isnan(source))
+                return source;
+            return destination > source ? destination : source;
+#endif
+        }
+
+        int mapMultiplyAndConvertToInt32(float value, float multiplier) noexcept
         {
             const long double d = static_cast<long double>(value) * static_cast<long double>(multiplier);
             if (!std::isfinite(d) ||
@@ -909,7 +952,7 @@ namespace as1
                 if (nvid >= appVidTable.count())
                     appVidTable.setStoredCount(nvid + 1);
                 if (overlayExistingDepot)
-                    created->type = static_cast<WORD>(created->type | VID_TYPE_LINKXYZ); // byte [VID+0x2A1] |= 2
+                    created->type = static_cast<WORD>(created->type | VID_TYPE_LINKXYZ); // enable linked-coordinate behavior
                 bindWeaponForVid(created);
                 if (m_graph)
                     m_graph->advanceMovieFrameClock(appVidTable.slot(0));
@@ -1626,7 +1669,7 @@ namespace as1
             }
         }
 
-        // Application+0x58: 16 BaseSpriteList owners, stride 0x10.
+        // The application owns 16 sprite-list buckets.
         core::ApplicationDrawDispatcherState& drawState = core::GlobalApplicationDrawDispatcherState();
         for (int pass = 0; pass < core::ApplicationDrawDispatcherState::PassCount; ++pass)
         {
@@ -1862,16 +1905,25 @@ namespace as1
         if (!startLoadMap(&mapResource))
             return false;
 
-        drawRetailMapLoadStage(m_graph, "Load gridZ");
+        if (!m_useLegacyCompactSpriteRecords)
+            drawRetailMapLoadStage(m_graph, "Load gridZ");
         loadGridZ(&mapResource);
 
-        drawRetailMapLoadStage(m_graph, "Load hardware terrain");
+        // The game logic: the legacy (GRPH-absent) path restores the
+        // complete fixed-function D3D state block through this code path here,
+        // immediately before sprite materialization.
+        if (m_useLegacyCompactSpriteRecords && m_graph)
+            (void)m_graph->restoreDeviceRenderStatesRetail();
+
+        if (!m_useLegacyCompactSpriteRecords)
+            drawRetailMapLoadStage(m_graph, "Load hardware terrain");
         if (!loadSprites(&mapResource))
             return false;
 
         core::buildCrossingLinkGrid(&core::globalWeakControllerMap());
 
-        drawRetailMapLoadStage(m_graph, "Load data for sprite");
+        if (!m_useLegacyCompactSpriteRecords)
+            drawRetailMapLoadStage(m_graph, "Load data for sprite");
         if (!loadSpriteRestoreData(&mapResource))
             return false;
 
@@ -2160,11 +2212,14 @@ namespace as1
         const bool hasGraphSection = (map->GoBegin(RESOURCE::ResTypes::GRAPH) == 0);
         m_useLegacyCompactSpriteRecords = !hasGraphSection;
 
-        if (!hasGraphSection)
+        // The game logic emits this loading stage on the normal
+        // GRPH-present branch, before GRAPH::LoadParameters.
+        if (hasGraphSection)
+        {
             drawRetailMapLoadStage(m_graph, "Load graph parameters");
-
-        if (m_graph)
-            m_graph->LoadParameters(map);
+            if (m_graph)
+                m_graph->LoadParameters(map);
+        }
 
         const int headResult = m_useLegacyCompactSpriteRecords
             ? map->GoBegin(RESOURCE::ResTypes::HEAD)
@@ -2209,6 +2264,12 @@ namespace as1
             map->read(&sy, 2);
             map->read(&m_currentTime, 4);
             map->read(&m_version, 4);
+
+            // Retail legacy order is HEAD core first, followed by the compact
+            // graph parameters stored in the tail of the same HEAD section.
+            if (m_graph)
+                m_graph->LoadLegacyParameters(map);
+
             m_sizeXY.x = static_cast<float>(ix);
             m_sizeXY.y = static_cast<float>(iy);
             m_shiftXY.x = static_cast<float>(sx);
@@ -2261,8 +2322,11 @@ namespace as1
             app->setWorldStartTime(core::CurrentTimeMilliseconds());
 #endif
 
-        LOG::Write("CurrentTime   =%-15u   sizeof(SPRITE)=%-8i Map version   =%i",
-                   core::CurrentTimeMilliseconds(), static_cast<int>(sizeof(SPRITE)), m_version);
+        if (!m_useLegacyCompactSpriteRecords)
+        {
+            LOG::Write("CurrentTime   =%-15u   sizeof(SPRITE)=%-8i Map version   =%i",
+                       core::CurrentTimeMilliseconds(), static_cast<int>(sizeof(SPRITE)), m_version);
+        }
 
         m_originalShiftXY = m_shiftXY;
         core::GlobalApplicationDrawDispatcherState().setCameraShiftX(m_shiftXY.x);
@@ -2273,7 +2337,8 @@ namespace as1
         setTerrainGridDimensions(retailTerrainGridDimension(m_sizeXY.x),
                                  retailTerrainGridDimension(m_sizeXY.y));
 
-        drawRetailMapLoadStage(m_graph, "Create new hash table");
+        if (!m_useLegacyCompactSpriteRecords)
+            drawRetailMapLoadStage(m_graph, "Create new hash table");
         reinitSpritesCollector();
 
         if (m_graph && !m_useLegacyCompactSpriteRecords)
@@ -2858,54 +2923,43 @@ namespace as1
         const VECTOR2 scrollMin{appDraw.scrollMinXLimit(), appDraw.scrollMinYLimit()};
         const VECTOR2 scrollMax{appDraw.scrollMaxXLimit(), appDraw.scrollMaxYLimit()};
         const MapCameraClampRect cameraRect = buildMapCameraClampRect(*m_graph, scrollMin, scrollMax);
-        float shiftX = static_cast<float>(
-            static_cast<double>(centerX) - static_cast<double>(cameraRect.screenW) * 0.5);
-        double shiftYLive =
-            static_cast<double>(centerY) - static_cast<double>(cameraRect.screenH) * 0.5;
 
-        // x87 `test ah,1`: less-than OR unordered clamps to the minimum.
-        if (shiftX < cameraRect.minX || std::isnan(shiftX) || std::isnan(cameraRect.minX))
-            shiftX = cameraRect.minX;
-        if (shiftYLive < static_cast<double>(cameraRect.minY) ||
-            std::isnan(shiftYLive) || std::isnan(cameraRect.minY))
-            shiftYLive = cameraRect.minY;
+        // The game logic is binary32 throughout this camera path.
+        float shiftX = centerX - cameraRect.screenW * 0.5f;
+        float shiftY = centerY - cameraRect.screenH * 0.5f;
 
-        // x87 `test ah,41h`: only ordered-greater clamps to the maximum;
-        // less/equal/unordered keep the candidate value.
-        if (!std::isnan(shiftX) && !std::isnan(cameraRect.maxX) && shiftX > cameraRect.maxX)
-            shiftX = cameraRect.maxX;
-        if (!std::isnan(shiftYLive) && !std::isnan(cameraRect.maxY) &&
-            shiftYLive > static_cast<double>(cameraRect.maxY))
-            shiftYLive = cameraRect.maxY;
+        // Bit 0x10000000 is the retail "do not clamp" flag.  The old
+        // Clamp only when required so script/camera moves keep their intended range.
+        if ((static_cast<std::uint32_t>(effect) & 0x10000000u) == 0u)
+        {
+            // Exact single-precision maximum/single-precision minimum operand order from this code path.
+            shiftX = retailMaxssForMap(cameraRect.minX, shiftX);
+            shiftX = retailMinssForMap(cameraRect.maxX, shiftX);
+            shiftY = retailMaxssForMap(cameraRect.minY, shiftY);
+            shiftY = retailMinssForMap(cameraRect.maxY, shiftY);
+        }
 
         const float currentCameraX = appDraw.cameraShiftX();
         const float currentCameraY = appDraw.cameraShiftY();
-        const bool xEqualOrUnordered =
-            (currentCameraX == shiftX) || std::isnan(currentCameraX) || std::isnan(shiftX);
-        const bool yEqualOrUnordered =
-            (static_cast<double>(currentCameraY) == shiftYLive) ||
-            std::isnan(currentCameraY) || std::isnan(shiftYLive);
-        if (xEqualOrUnordered && yEqualOrUnordered)
+        // floating-point comparison + comparison status test falls through only on ordered equality.
+        if (currentCameraX == shiftX && currentCameraY == shiftY)
             return;
 
         if (effect == 2)
         {
             m_graph->setEffect(2,
-                                retailFtolLow32ForMap(centerX),
-                                retailFtolLow32ForMap(centerY),
-                                0);
+                               truncateFloatToInt32ForMap(centerX),
+                               truncateFloatToInt32ForMap(centerY),
+                               0);
             return;
         }
 
-        const float deltaX = static_cast<float>(
-            static_cast<double>(shiftX) - static_cast<double>(currentCameraX));
-        const float deltaY = static_cast<float>(
-            shiftYLive - static_cast<double>(currentCameraY));
-        const float committedShiftY = static_cast<float>(shiftYLive);
+        const float deltaX = shiftX - currentCameraX;
+        const float deltaY = shiftY - currentCameraY;
         appDraw.setCameraShiftX(shiftX);
-        appDraw.setCameraShiftY(committedShiftY);
+        appDraw.setCameraShiftY(shiftY);
         m_shiftXY.x = shiftX;
-        m_shiftXY.y = committedShiftY;
+        m_shiftXY.y = shiftY;
 
         SPRITE_LIST& frameList = applicationFrameSpriteList();
         const int persistentCount = frameList.activeCount();
@@ -2917,13 +2971,14 @@ namespace as1
         }
 
         SPRITE* currentMouseSprite = mouseSprite();
-        currentMouseSprite->ChangeCoor(currentMouseSprite->X() + deltaX, currentMouseSprite->Y() + deltaY, currentMouseSprite->Z());
+        currentMouseSprite->ChangeCoor(currentMouseSprite->X() + deltaX,
+                                       currentMouseSprite->Y() + deltaY,
+                                       currentMouseSprite->Z());
 
         m_shiftDeltaXY.x += deltaX;
         m_shiftDeltaXY.y += deltaY;
 
-        // GRAPH receives the committed Application top-left camera and the
-        // D3DTS_VIEW payload. MAP::m_shiftXY is only a synchronized mirror.
+        // Keep the public camera mirror synchronized with the committed top-left.
         m_graph->SetCamera(m_shiftXY.x, m_shiftXY.y);
 
 #ifdef _WIN32
@@ -2932,8 +2987,14 @@ namespace as1
         view._22 = 1.0f;
         view._32 = -1.0f;
         view._33 = 1.0f;
-        view._41 = -m_shiftXY.x - cameraRect.screenW * 0.5f;
-        view._42 = -m_shiftXY.y - cameraRect.screenH * 0.5f;
+
+        // The game logic uses the viewport center here, not half of the full
+        // render surface.  This distinction matters when a 640x480 logical
+        // viewport is hosted inside a larger backbuffer/HUD resolution.
+        const float viewportCenterX = (cameraRect.clipRight + cameraRect.clipLeft) * 0.5f;
+        const float viewportCenterY = (cameraRect.clipBottom + cameraRect.clipTop) * 0.5f;
+        view._41 = -m_shiftXY.x - viewportCenterX;
+        view._42 = -m_shiftXY.y - viewportCenterY;
         view._44 = 1.0f;
 
         IDirect3DDevice8* device = static_cast<IDirect3DDevice8*>(m_graph->deviceHandle());
@@ -3300,8 +3361,8 @@ namespace as1
             deleteVidThroughRetailDeletingDestructor(oldGround);
         }
 
-        const int groundSizeY = retailFtolLow32ForMap(SizeY());
-        const int groundSizeX = retailFtolLow32ForMap(SizeX());
+        const int groundSizeY = mapConvertFloatToInt32(SizeY());
+        const int groundSizeX = mapConvertFloatToInt32(SizeX());
         auto ground = std::unique_ptr<VID_HARDWARE>(
             new (std::nothrow) VID_HARDWARE(1024, groundSizeX, groundSizeY));
         VID_HARDWARE* const rawGround = ground.get();
@@ -3468,12 +3529,12 @@ namespace as1
         if (!x87LessOrUnorderedForMap(y, mapSizeY))
             return;
 
-        const int zInt = retailFtolLow32ForMap(z);
-        const int negativeGridY = retailFtolMulLow32ForMap(y, -0.125f);
+        const int zInt = mapConvertFloatToInt32(z);
+        const int negativeGridY = mapMultiplyAndConvertToInt32(y, -0.125f);
         const int yProduct = static_cast<int>(
             static_cast<std::uint32_t>(negativeGridY) *
             static_cast<std::uint32_t>(terrainGridWidth()));
-        const int xInt = retailFtolLow32ForMap(x);
+        const int xInt = mapConvertFloatToInt32(x);
         const int xDiv8 = (xInt + (xInt < 0 ? 7 : 0)) >> 3;
         const int index = static_cast<int>(
             static_cast<std::uint32_t>(xDiv8) - static_cast<std::uint32_t>(yProduct));
@@ -3574,13 +3635,13 @@ namespace as1
 #endif
 
         // 0x40E6A8..0x40E6FC has asymmetric temporary stores.  All four final
-        // raw bounds are FSTP m32real before the clamp stage, so model those
+        // raw bounds are binary32 store before the clamp stage, so model those
         // exact binary32 boundaries explicitly.
         const long double halfXExtended =
             static_cast<long double>(vid->sizeXYZ.x) * 0.5L;
         const long double halfYExtended =
             static_cast<long double>(vid->sizeXYZ.y) * 0.5L;
-        const float halfYStored = static_cast<float>(halfYExtended); // explicit binary32 store before the next x87 operation
+        const float halfYStored = static_cast<float>(halfYExtended); // explicit binary32 store before the next extended precision operation
         const float maxXRaw = static_cast<float>(
             static_cast<long double>(v.x) + halfXExtended - 3.0L);
         const float maxYRaw = static_cast<float>(
@@ -3822,7 +3883,7 @@ namespace as1
                     Vid(nVid3)->setDamageInterceptScriptFunction(functionIndex);
                 continue;
             }
-            // Fddd_Destroy: strncmp(name+5,"DESTROY",7), then slot +0x3FC.
+            // Detect the DESTROY script marker and dispatch the matching callback.
             if (name.size() >= 12 && name[4] == '_' && name.compare(5, 7, "DESTROY") == 0)
             {
                 if (fn.value2 != 1)

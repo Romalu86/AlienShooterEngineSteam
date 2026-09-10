@@ -148,7 +148,7 @@ namespace as1
             return numerator / denominator;
         }
 
-        int retailFtolLow32ForVid(float value) noexcept
+        int vidConvertFloatToInt32(float value) noexcept
         {
             const long double d = static_cast<long double>(value);
             if (!std::isfinite(d) ||
@@ -895,7 +895,7 @@ namespace as1
 
     void VID::setNoChildValueForDataCode(int type, int value) noexcept
     {
-        // Same authoritative VID+0x294..+0x2D4 noChild owner as spawnAnimationChild.
+        // Use the same no-child table as spawnAnimationChild.
         if (type < script::VidNoChildFirst || type >= script::VidNoChildEnd)
             return;
         noChild[static_cast<std::size_t>(type - script::VidNoChildFirst)] = value;
@@ -1258,7 +1258,7 @@ namespace as1
         (void)res->read(&linkXYZ.y, 4);
         (void)res->read(&linkXYZ.z, 4);
         (void)res->read(&nLinkVid, 4);
-        // +0x05C is the runtime linkVid pointer and is not serialized.
+        // The runtime linkVid pointer is not serialized.
         (void)res->read(&topZ, 4);
         (void)res->read(&forMoveUpZ, 4);
         (void)res->read(&forMoveDownZ, 4);
@@ -2751,7 +2751,7 @@ namespace as1
     int VID_SOFTWARE::updateGroundZFromCompactFrame(const SPRITE* sprite) noexcept
     {
 
-        const int spriteZ = retailFtolLow32ForVid(sprite->Z());
+        const int spriteZ = vidConvertFloatToInt32(sprite->Z());
         const WORD typeFlags = formatFlags();
         if ((typeFlags & VID_TYPE_ZBUFFER) == 0)
             return spriteZ;
@@ -2765,8 +2765,8 @@ namespace as1
         const int frameHeaderCount = static_cast<int>(*reinterpret_cast<const short*>(frame));
         BYTE* rowData = frame + 2 + frameHeaderCount * 6;
 
-        const int left = subtractWrap32(retailFtolLow32ForVid(sprite->X()), vidWidth() / 2);
-        const int topWithoutZ = subtractWrap32(retailFtolLow32ForVid(sprite->Y()), vidHeight() / 2);
+        const int left = subtractWrap32(vidConvertFloatToInt32(sprite->X()), vidWidth() / 2);
+        const int topWithoutZ = subtractWrap32(vidConvertFloatToInt32(sprite->Y()), vidHeight() / 2);
         const int topProjected = subtractWrap32(topWithoutZ, spriteZ);
         const int zBase = subtractWrap32(spriteZ, 128);
 

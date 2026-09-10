@@ -11,6 +11,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <xmmintrin.h>
 #include <array>
 #include <cstring>
 #include <new>
@@ -19,31 +20,33 @@ namespace as1
 {
     namespace
     {
-        int retailDrawXFtolSoftware16(float x, float cameraX, int halfWidth) noexcept
+        int truncateFloatToInt32Software16(float value) noexcept
         {
-            const long double value = static_cast<long double>(x) -
-                                      static_cast<long double>(cameraX) -
-                                      static_cast<long double>(halfWidth);
-            if (!std::isfinite(value) ||
-                value < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                value > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(value));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (std::isnan(value) || value >= 2147483648.0f || value < -2147483648.0f)
+                return std::numeric_limits<int>::min();
+            return static_cast<int>(value);
+#endif
         }
 
-        int retailDrawYFtolSoftware16(float y, float z, float cameraY, int halfHeight) noexcept
+        int retailWrapSubSoftware16(int lhs, int rhs) noexcept
         {
-            const long double value = static_cast<long double>(y) -
-                                      static_cast<long double>(z) -
-                                      static_cast<long double>(cameraY) -
-                                      static_cast<long double>(halfHeight);
-            if (!std::isfinite(value) ||
-                value < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                value > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(value));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+            return static_cast<int>(static_cast<std::uint32_t>(lhs) - static_cast<std::uint32_t>(rhs));
+        }
+
+        int softwareDrawXToInt3216(float x, float cameraX, int halfWidth) noexcept
+        {
+            int value = retailWrapSubSoftware16(truncateFloatToInt32Software16(x), truncateFloatToInt32Software16(cameraX));
+            return retailWrapSubSoftware16(value, halfWidth);
+        }
+
+        int softwareDrawYToInt3216(float y, float z, float cameraY, int halfHeight) noexcept
+        {
+            float projectedY = y - z;
+            int value = retailWrapSubSoftware16(truncateFloatToInt32Software16(projectedY), truncateFloatToInt32Software16(cameraY));
+            return retailWrapSubSoftware16(value, halfHeight);
         }
     }
     DWORD* expandSoftware16ColorToBgra(DWORD* destination, const WORD* source) noexcept
@@ -286,8 +289,8 @@ namespace as1
         const core::ApplicationDrawDispatcherState& appDraw = core::GlobalApplicationDrawDispatcherState();
         const float cameraX = appDraw.cameraShiftX();
         const float cameraY = appDraw.cameraShiftY();
-        const int drawLeft = retailDrawXFtolSoftware16(sprite->X(), cameraX, sizeX / 2);
-        int drawTop = retailDrawYFtolSoftware16(sprite->Y(), sprite->Z(), cameraY, sizeY / 2);
+        const int drawLeft = softwareDrawXToInt3216(sprite->X(), cameraX, sizeX / 2);
+        int drawTop = softwareDrawYToInt3216(sprite->Y(), sprite->Z(), cameraY, sizeY / 2);
 
         if (drawLeft + sizeX < clipLeft || drawLeft >= clipRight ||
             drawTop + sizeY < clipTop || drawTop >= clipBottom)
@@ -510,10 +513,18 @@ namespace as1
 
         const int sizeX = static_cast<std::int16_t>(vidWidth());
         const int sizeY = static_cast<std::int16_t>(vidHeight());
-        const int drawLeft = static_cast<int>(sprite->X() - static_cast<float>(sizeX / 2)) -
-            tile.destinationX - tile.sourceX;
-        int drawTop = static_cast<int>(sprite->Y() - sprite->Z() - static_cast<float>(sizeY / 2)) -
-            tile.destinationY - tile.sourceY;
+
+        float drawLeftFloat = sprite->X();
+        drawLeftFloat -= static_cast<float>(sizeX / 2);
+        drawLeftFloat -= static_cast<float>(tile.destinationX);
+        drawLeftFloat -= static_cast<float>(tile.sourceX);
+        const int drawLeft = truncateFloatToInt32Software16(drawLeftFloat);
+
+        float drawTopFloat = sprite->Y() - sprite->Z();
+        drawTopFloat -= static_cast<float>(sizeY / 2);
+        drawTopFloat -= static_cast<float>(tile.destinationY);
+        drawTopFloat -= static_cast<float>(tile.sourceY);
+        int drawTop = truncateFloatToInt32Software16(drawTopFloat);
 
         if (drawLeft + sizeX < clipLeft || drawLeft >= clipRight ||
             drawTop + sizeY < clipTop || drawTop >= clipBottom)
@@ -671,7 +682,7 @@ namespace as1
                         if (zPalettePayload)
                         {
                             const WORD z = static_cast<WORD>(baseDepthWord + zWords[i]);
-                            // 4154D0/4155C0/...: signed 16-bit JLE, strict >.
+                            // These paths use a strict signed 16-bit greater-than depth test.
                             if (static_cast<std::int16_t>(z) <= static_cast<std::int16_t>(oldDepth))
                                 continue;
                             depthRow[dx] = z;
@@ -679,8 +690,7 @@ namespace as1
                             continue;
                         }
 
-                        // 415889/41596C and 415B79 zero-extend the old WORD to
-                        // 32 bits, then use JL. Equality is accepted.
+                        // These paths compare the zero-extended previous depth as a 32-bit value; equality is accepted.
                         if (constantDepthInt < static_cast<int>(oldDepth))
                             continue;
 
@@ -695,7 +705,7 @@ namespace as1
                 sourceX += run;
             }
 
-            // 415179/415267: only the alpha+palette family has the -8 row
+            // Only the alpha+palette family applies the -8 row
             // slope when VID +0x24 is greater than +0x20.
             if (visibleRow && alphaDepthStep != 0)
             {
@@ -705,7 +715,7 @@ namespace as1
         }
 
 
-        // 415BED tail: color texture first, Z texture second.
+        // Release color texture first, then the depth texture.
         texture->unlock();
         zTexture->unlock();
     }

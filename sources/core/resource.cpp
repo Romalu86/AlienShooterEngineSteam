@@ -283,7 +283,10 @@ namespace as1
             resource.m_sectionPosition = next;
             std::fseek(resource.m_file, static_cast<long>(next), SEEK_SET);
 
-            if (resource.m_sectionPosition >= resource.m_rootEnd)
+            // The game logic uses signed greater-than-or-equal comparison for the 32-bit resource
+            // positions.  Preserve that comparison after the wrapped adds.
+            if (static_cast<std::int32_t>(resource.m_sectionPosition) >=
+                static_cast<std::int32_t>(resource.m_rootEnd))
             {
                 resource.m_sectionPosition -= aligned + 8u;
                 resource.m_state = RESOURCE::st_seek;
@@ -325,7 +328,10 @@ namespace as1
             return -1;
 
         resource.m_currentSubresourcePosition += resource.m_currentSubresourceSize + 4u;
-        if (resource.m_currentSubresourcePosition < resource.m_sectionPosition + resource.m_sectionSize + 8u)
+        const std::uint32_t sectionEnd = resource.m_sectionPosition + resource.m_sectionSize + 8u;
+        // The game logic branches with signed less-than comparison here.
+        if (static_cast<std::int32_t>(resource.m_currentSubresourcePosition) <
+            static_cast<std::int32_t>(sectionEnd))
         {
             resource.m_state = RESOURCE::st_seek;
             std::fseek(resource.m_file, static_cast<long>(resource.m_currentSubresourcePosition), SEEK_SET);
@@ -406,7 +412,9 @@ namespace as1
             logResourceError(resource.m_name, resource.m_type, 5, "file not opened", 0);
             return 0;
         }
-        if (resource.m_currentSubresourceSize == 0)
+        // The game logic uses signed-positive check: zero and values with the sign
+        // bit set are rejected as an invalid/empty subresource.
+        if (static_cast<std::int32_t>(resource.m_currentSubresourceSize) <= 0)
         {
             logResourceError(resource.m_name, resource.m_type, 11, "SubLoad", 0);
             return 0;

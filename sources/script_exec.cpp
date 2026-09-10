@@ -132,11 +132,11 @@ namespace as1
 
         const input::InputMessageState& scriptApplicationInputState() noexcept
         {
-            if (void* const owner = core::ApplicationPhysicalOwner())
-                return *reinterpret_cast<const input::InputMessageState*>(
-                    static_cast<const std::uint8_t*>(owner) + core::retail_application_layout::InputState);
-            static const input::InputMessageState zero{};
-            return zero;
+            // Native script cases read the embedded input block directly from the retail
+            // application owner.  The game has no detached/zero-state fallback here.
+            const auto* const owner = static_cast<const std::uint8_t*>(core::ApplicationPhysicalOwner());
+            return *reinterpret_cast<const input::InputMessageState*>(
+                owner + core::retail_application_layout::InputState);
         }
 
 
@@ -1153,7 +1153,7 @@ namespace as1
 #if defined(_MSC_VER) && defined(_M_IX86)
             return static_cast<int>(static_cast<signed char>(c));
 #else
-            // Portable builds keep the standard ctype precondition; Win32/x86
+            // Portable builds keep the standard ctype precondition; Win32/32-bit
             // preserves the signed-byte runtime contract.
             return static_cast<int>(c);
 #endif
@@ -4236,7 +4236,7 @@ namespace as1
                     }
                 }
 
-                while (!sprite && g_scriptSpriteIteratorPass < 13)
+                while (!sprite && g_scriptSpriteIteratorPass < core::ApplicationDrawDispatcherState::PassCount - 1)
                 {
                     ++g_scriptSpriteIteratorPass;
                     g_scriptSpriteIteratorCursor = drawState.drawPassBucket(g_scriptSpriteIteratorPass).count();
@@ -4307,9 +4307,11 @@ namespace as1
                 int value = 0xEA60;
                 if (sprite)
                 {
-                    const long double distance = approximatePlanarDistance(
+                    // The game logic case 80 spills the extended precision result of this code path
+                    // to m32real before truncating float-to-int conversion.  Preserve that binary32 narrowing.
+                    const float distance = static_cast<float>(approximatePlanarDistance(
                         static_cast<float>(x) - sprite->X(),
-                        static_cast<float>(y) - sprite->Y());
+                        static_cast<float>(y) - sprite->Y()));
                     value = static_cast<int>(distance);
                 }
                 scriptPushIntegerRetail(value);
@@ -4393,13 +4395,13 @@ namespace as1
         case script::NativeFunctionCode::ViewXMin:
 {
                 GRAPH* const graph = GRAPH::CurrentGraph();
-                scriptPushIntegerRetail(graph ? static_cast<int>(static_cast<float>(graph->getViewportLeft())) : 0);
+                scriptPushIntegerRetail(static_cast<int>(static_cast<float>(graph->getViewportLeft())));
                 return 0;
             }
         case script::NativeFunctionCode::ViewYMin:
 {
                 GRAPH* const graph = GRAPH::CurrentGraph();
-                scriptPushIntegerRetail(graph ? static_cast<int>(static_cast<float>(graph->getViewportTop())) : 0);
+                scriptPushIntegerRetail(static_cast<int>(static_cast<float>(graph->getViewportTop())));
                 return 0;
             }
         case script::NativeFunctionCode::GetCommands:
@@ -4601,11 +4603,9 @@ namespace as1
                 }
 
                 const int direction = ((directionSource << 8) / static_cast<int>(vid->directionCount())) & 0xFF;
-                SPRITE* created = nullptr;
-                if (MAP* const map = MAP::Current())
-                    created = map->CreateSpriteViaFactory(
-                        vid, VECTOR(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)),
-                        ANGLE(direction), nullptr, false);
+                SPRITE* const created = MAP::Current()->CreateSpriteViaFactory(
+                    vid, VECTOR(static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)),
+                    ANGLE(direction), nullptr, false);
                 scriptPushSpriteReferenceRetail(scriptSpritePointerValue(created));
                 return 0;
             }
@@ -4640,8 +4640,7 @@ namespace as1
                 if (value != 0)
                 {
                     core::Application::beginBucketTimingSnapshot(drawState);
-                    if (mouseInstanceRef())
-                        mouseInstanceRef()->setCursorId(0);
+                    mouseInstanceRef()->setCursorId(0);
                 }
                 else
                 {
@@ -4653,8 +4652,6 @@ namespace as1
 {
                 const int cursorId = scriptPopIntegerRetail();
                 MOUSE* mouse = mouseInstanceRef();
-                if (!mouse)
-                    return 0;
 
                 if (cursorId == -1)
                 {
@@ -4675,8 +4672,7 @@ namespace as1
                 if (!mouse->cursorHandlesLoaded())
                     mouse->HardwareOn();
                 mouse = mouseInstanceRef();
-                if (mouse)
-                    mouse->setCursorId(cursorId);
+                mouse->setCursorId(cursorId);
                 return 0;
             }
         case script::NativeFunctionCode::MessageText:
@@ -4685,13 +4681,10 @@ namespace as1
                         const int x = scriptPopIntegerRetail();
                         STRING text = *script->popStringRetail();
                 #ifdef _WIN32
-                        if (win::ApplicationWin* const app = win::applicationWinInstance())
-                        {
-                            PLAYER* const player = app->startupPlayerSlotByIndex(
-                                static_cast<int>(app->activeStartupPlayerIndex()));
-                            if (player)
-                                player->submitPathCoordinate(&text, static_cast<float>(x), static_cast<float>(y));
-                        }
+                        win::ApplicationWin* const app = win::applicationWinInstance();
+                        PLAYER* const player = app->startupPlayerSlotByIndex(
+                            static_cast<int>(app->activeStartupPlayerIndex()));
+                        player->submitPathCoordinate(&text, static_cast<float>(x), static_cast<float>(y));
                 #endif
                         return 0;
             }
@@ -4709,8 +4702,7 @@ namespace as1
 {
                 const int y = scriptPopIntegerRetail();
                 const int x = scriptPopIntegerRetail();
-                if (MAP* const map = MAP::Current())
-                    map->SetShiftCoor(static_cast<float>(x), static_cast<float>(y), 0);
+                MAP::Current()->SetShiftCoor(static_cast<float>(x), static_cast<float>(y), 0);
                 return 0;
             }
         case script::NativeFunctionCode::SetScrollType:
@@ -4746,8 +4738,9 @@ namespace as1
             }
         case script::NativeFunctionCode::PlayerNoop:
 {
-                (void)scriptPopIntegerRetail();
-                // Both active PLAYER virtual slots are intentional no-op handlers.
+                const int value = scriptPopIntegerRetail();
+                PLAYER* const player = scriptPlayerSlot(static_cast<int>(core::ActivePlayerIndex()));
+                player->dispatchReservedScriptToggleViaRetailVtable(value);
                 return 0;
             }
         case script::NativeFunctionCode::GetString:
@@ -4827,8 +4820,7 @@ namespace as1
 {
                 const int var1 = scriptPopIntegerRetail();
                 const int var2 = scriptPopIntegerRetail();
-                if (Mouse)
-                    Mouse->Action(63, static_cast<std::intptr_t>(var2), var1, 0);
+                Mouse->Action(63, static_cast<std::intptr_t>(var2), var1, 0);
                 return 0;
             }
         case script::NativeFunctionCode::SetSoundVolume:
@@ -4983,8 +4975,7 @@ namespace as1
                 const int fullscreen = scriptPopIntegerRetail();
                 const int sizeY = scriptPopIntegerRetail();
                 const int sizeX = scriptPopIntegerRetail();
-                if (GRAPH* const graph = GRAPH::CurrentGraph())
-                    graph->queueSteamDisplayChange(sizeX, sizeY, fullscreen);
+                GRAPH::CurrentGraph()->queueSteamDisplayChange(sizeX, sizeY, fullscreen);
                 return 0;
             }
         case script::NativeFunctionCode::GetMapName:
@@ -5086,13 +5077,10 @@ namespace as1
                 VID* const vid = scriptPopVidRetail("for CanPlace");
 
                 int handle = 0;
-                if (MAP* const map = MAP::Current())
+                if (SPRITE* const hit = GlobalHashQueryCellCollisionByVid(
+                        *MAP::Current(), vid, static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)))
                 {
-                    if (SPRITE* const hit = GlobalHashQueryCellCollisionByVid(
-                            *map, vid, static_cast<float>(x), static_cast<float>(y), static_cast<float>(z)))
-                    {
-                        handle = scriptSpritePointerValue(hit);
-                    }
+                    handle = scriptSpritePointerValue(hit);
                 }
                 scriptPushSpriteReferenceRetail(handle);
                 return 0;
@@ -5454,10 +5442,9 @@ namespace as1
                 {
                     if (sprite->Vid() == source)
                     {
-                        if (MAP* const map = MAP::Current())
-                            map->CreateSpriteViaFactory(
-                                replacement, VECTOR(sprite->X(), sprite->Y(), sprite->Z()),
-                                ANGLE(sprite->directionIndex()), nullptr, false);
+                        MAP::Current()->CreateSpriteViaFactory(
+                            replacement, VECTOR(sprite->X(), sprite->Y(), sprite->Z()),
+                            ANGLE(sprite->directionIndex()), nullptr, false);
                         DeleteSpriteThroughVirtualDeletingDestructor(sprite);
                     }
                     sprite = core::Application::previousSpriteInDrawPass(drawState, pass, &cursor);

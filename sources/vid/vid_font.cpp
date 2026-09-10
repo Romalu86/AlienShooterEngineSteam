@@ -55,20 +55,15 @@ namespace as1
 
     void VID_FONT::Draw(const SPRITE* sprite)
     {
-        if (!m_fontOwner || !sprite)
+        if (!m_fontOwner)
             return;
 
         GammaRawPair selected{};
         sprite->buildRetailGammaPair(selected);
 
-        float x = sprite->X();
-        float y = sprite->Y() - sprite->Z();
-        if (MAP* const map = MAP::Current())
-        {
-            x = map->ToScreenX(sprite->X());
-            y = map->ToScreenY(sprite->Y(), sprite->Z());
-        }
-
+        MAP* const map = MAP::Current();
+        const float x = map->ToScreenX(sprite->X());
+        const float y = map->ToScreenY(sprite->Y(), sprite->Z());
         (void)drawRetailVidFontOwner(m_fontOwner, x, y, ~selected.first, "", 0u);
     }
 

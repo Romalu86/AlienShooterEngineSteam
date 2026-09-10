@@ -232,7 +232,7 @@ namespace as1
             return 1;
         }
 
-        constexpr float kRetailPositionEpsilon = 0.001f;
+        constexpr double kRetailPositionEpsilon = 0.001;
         for (;;)
         {
             int oldAddress = 0;
@@ -265,9 +265,14 @@ namespace as1
                 if (!sprite || !vid || vid->nvid() != nvid)
                     continue;
 
-                if (std::fabs(sprite->X() - expectedX) >= kRetailPositionEpsilon ||
-                    std::fabs(sprite->Y() - expectedY) >= kRetailPositionEpsilon ||
-                    std::fabs(sprite->Z() - authoredZ) >= kRetailPositionEpsilon)
+                // Retail subtracts in single precision, then widens the delta to double
+                // before the absolute-value comparison against the 0.001 tolerance.
+                const float deltaX = sprite->X() - expectedX;
+                const float deltaY = sprite->Y() - expectedY;
+                const float deltaZ = sprite->Z() - authoredZ;
+                if (std::fabs(static_cast<double>(deltaX)) >= kRetailPositionEpsilon ||
+                    std::fabs(static_cast<double>(deltaY)) >= kRetailPositionEpsilon ||
+                    std::fabs(static_cast<double>(deltaZ)) >= kRetailPositionEpsilon)
                     continue;
 
                 (void)releaseByIndexRetail(i);

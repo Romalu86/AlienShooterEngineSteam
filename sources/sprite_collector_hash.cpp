@@ -9,6 +9,10 @@
 #include <cmath>
 #include <cstdint>
 #include <new>
+#include <limits>
+#if defined(_MSC_VER) && defined(_M_IX86)
+#include <xmmintrin.h>
+#endif
 
 namespace as1
 {
@@ -24,108 +28,203 @@ namespace as1
         };
 
         constexpr int kBucketListRecordStride = 0x10;
-        constexpr unsigned short kX87ConditionLess = 0x0100u;
-        constexpr unsigned short kX87ConditionEqual = 0x4000u;
-        constexpr unsigned short kX87ConditionUnordered = 0x4500u;
-        constexpr unsigned short kX87LessOrEqualOrUnorderedMask =
-            kX87ConditionLess | kX87ConditionEqual;
+        constexpr unsigned short kFloatCompareLess = 0x0100u;
+        constexpr unsigned short kFloatCompareEqual = 0x4000u;
+        constexpr unsigned short kFloatCompareUnordered = 0x4500u;
+        constexpr unsigned short kFloatCompareLessOrEqualMask =
+            kFloatCompareLess | kFloatCompareEqual;
         constexpr std::uint32_t kMovementTraceSampleMask = 0x0Fu; // sample every 16 integer steps
 
-        int x87FloatToInt(float value) noexcept
+        int truncateFloatToInt32(float value) noexcept
         {
-            const double d = static_cast<double>(value);
-            if (!std::isfinite(d) || d >= 9223372036854775808.0 || d < -9223372036854775808.0)
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+#if defined(_MSC_VER) && defined(_M_IX86)
+            // The game hash-grid paths use truncating float-to-int conversion directly.
+            // Preserve the integer-indefinite result (INT_MIN) for
+            // unordered/out-of-range values instead of routing through int64.
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (std::isnan(value) || value < -2147483648.0f || value >= 2147483648.0f)
+                return std::numeric_limits<std::int32_t>::min();
+            return static_cast<int>(value);
+#endif
         }
 
-        unsigned short x87CompareStatus(float lhs, float rhs) noexcept
+        float multiplyRoundedFloat(float lhs, float rhs) noexcept
         {
-            // x87 C3:C2:C0 encoding: greater=000, less=001, equal=100,
-            // unordered=111.  Only those status bits are consumed here.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            float out = 0.0f;
+            _mm_store_ss(&out, _mm_mul_ss(_mm_set_ss(lhs), _mm_set_ss(rhs)));
+            return out;
+#else
+            volatile float l = lhs;
+            volatile float r = rhs;
+            volatile float out = l * r;
+            return out;
+#endif
+        }
+
+        float subtractRoundedFloat(float lhs, float rhs) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            float out = 0.0f;
+            _mm_store_ss(&out, _mm_sub_ss(_mm_set_ss(lhs), _mm_set_ss(rhs)));
+            return out;
+#else
+            volatile float l = lhs;
+            volatile float r = rhs;
+            volatile float out = l - r;
+            return out;
+#endif
+        }
+
+        float addRoundedFloat(float lhs, float rhs) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            float out = 0.0f;
+            _mm_store_ss(&out, _mm_add_ss(_mm_set_ss(lhs), _mm_set_ss(rhs)));
+            return out;
+#else
+            volatile float l = lhs;
+            volatile float r = rhs;
+            volatile float out = l + r;
+            return out;
+#endif
+        }
+
+        float divideRoundedFloat(float lhs, float rhs) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            float out = 0.0f;
+            _mm_store_ss(&out, _mm_div_ss(_mm_set_ss(lhs), _mm_set_ss(rhs)));
+            return out;
+#else
+            volatile float l = lhs;
+            volatile float r = rhs;
+            volatile float out = l / r;
+            return out;
+#endif
+        }
+
+        unsigned short floatCompareStatus(float lhs, float rhs) noexcept
+        {
+            // Preserve less/equal/unordered comparison semantics, including NaN handling.
             if (std::isnan(lhs) || std::isnan(rhs))
-                return kX87ConditionUnordered;
+                return kFloatCompareUnordered;
             if (lhs < rhs)
-                return kX87ConditionLess;
+                return kFloatCompareLess;
             if (lhs == rhs)
-                return kX87ConditionEqual;
+                return kFloatCompareEqual;
             return 0;
         }
 
         bool x87LessThanOrUnordered(float lhs, float rhs) noexcept
         {
-            // `test ah,1`: C0 set for less-than and unordered.
-            return (x87CompareStatus(lhs, rhs) & kX87ConditionLess) != 0u;
+            return (floatCompareStatus(lhs, rhs) & kFloatCompareLess) != 0u;
         }
 
         bool x87LessOrEqualOrUnordered(float lhs, float rhs) noexcept
         {
-            // `test ah,41h`: C0/C3 set for less/equal/unordered.
-            return (x87CompareStatus(lhs, rhs) & kX87LessOrEqualOrUnorderedMask) != 0u;
+            return (floatCompareStatus(lhs, rhs) & kFloatCompareLessOrEqualMask) != 0u;
         }
 
-        int x87FloatToIntClamped(float scaled, int limit) noexcept
+        int retailCellIndexFromScaled(float scaled, int limit) noexcept
         {
-            if (x87LessThanOrUnordered(scaled, 0.0f))
+            // Game floating-point comparison flow:
+            //   if (scaled < 0) -> 0;
+            //   if (scaled >= float(limit)) -> limit-1;
+            //   unordered falls through to truncating float-to-int conversion -> INT_MIN.
+            if (!std::isnan(scaled) && scaled < 0.0f)
                 return 0;
-            if (x87LessOrEqualOrUnordered(static_cast<float>(limit), scaled))
+
+            const float limitFloat = static_cast<float>(limit);
+            if (!std::isnan(scaled) && scaled >= limitFloat)
                 return limit - 1;
-            return x87FloatToInt(scaled);
+
+            return truncateFloatToInt32(scaled);
         }
 
-        int x87MultiplyToIntClamped(float value, float scale, int limit) noexcept
+        int retailMultiplyToCell(float value, float scale, int limit) noexcept
         {
-            return x87FloatToIntClamped(value * scale, limit);
+            return retailCellIndexFromScaled(multiplyRoundedFloat(value, scale), limit);
         }
 
-        float x87ReciprocalStored(float divisor) noexcept
+        float retailReciprocalStored(float divisor) noexcept
         {
-            return 1.0f / divisor;
+            return divideRoundedFloat(1.0f, divisor);
         }
 
-        int x87SubtractMultiplyToIntClamped(float value, float subtractValue, float scale, int limit) noexcept
+        int retailSubtractMultiplyToCell(float value, float subtractValue, float scale, int limit) noexcept
         {
-            return x87FloatToIntClamped((value - subtractValue) * scale, limit);
+            return retailCellIndexFromScaled(multiplyRoundedFloat(subtractRoundedFloat(value, subtractValue), scale), limit);
         }
 
-        int x87AddMultiplyToIntClamped(float value, float addValue, float scale, int limit) noexcept
+        int retailAddMultiplyToCell(float value, float addValue, float scale, int limit) noexcept
         {
-            return x87FloatToIntClamped((value + addValue) * scale, limit);
+            return retailCellIndexFromScaled(multiplyRoundedFloat(addRoundedFloat(value, addValue), scale), limit);
         }
 
-        int x87SubtractReciprocalMultiplyToIntClamped(float value, float divisor, int limit) noexcept
+        int retailSubtractReciprocalMultiplyToCell(float value, float divisor, int limit) noexcept
         {
-            const float reciprocal = 1.0f / divisor;
-            return x87FloatToIntClamped((value - reciprocal) * divisor, limit);
+            const float reciprocal = divideRoundedFloat(1.0f, divisor);
+            return retailCellIndexFromScaled(multiplyRoundedFloat(subtractRoundedFloat(value, reciprocal), divisor), limit);
         }
 
-        int x87AddReciprocalMultiplyToIntClamped(float value, float divisor, int limit) noexcept
+        int retailAddReciprocalMultiplyToCell(float value, float divisor, int limit) noexcept
         {
-            const float reciprocal = 1.0f / divisor;
-            return x87FloatToIntClamped((value + reciprocal) * divisor, limit);
+            const float reciprocal = divideRoundedFloat(1.0f, divisor);
+            return retailCellIndexFromScaled(multiplyRoundedFloat(addRoundedFloat(value, reciprocal), divisor), limit);
         }
 
-        float inversePowerOfTwoX87(int shift) noexcept
+        float inversePowerOfTwo(int shift) noexcept
         {
             const std::int32_t base = static_cast<std::int32_t>(std::uint32_t{1} << (shift & 31));
-            return 1.0f / static_cast<float>(base);
+            return divideRoundedFloat(1.0f, static_cast<float>(base));
         }
 
-        int computeHashHeightCellsX87(float mapHeight, float inverseCellHeight) noexcept
+        int computeHashHeightCells(float mapHeight, float inverseCellHeight) noexcept
         {
-            return x87FloatToInt((mapHeight - 1.0f) * inverseCellHeight + 3.0f);
+            // this code path: single-precision subtraction -> single-precision multiplication -> single-precision addition 1.0 -> single-precision addition 2.0 -> truncating float-to-int conversion.
+            // Keep the two additions separate; folding them to +3.0f changes
+            // binary32 rounding at boundary values.
+            float value = subtractRoundedFloat(mapHeight, 1.0f);
+            value = multiplyRoundedFloat(value, inverseCellHeight);
+            value = addRoundedFloat(value, 1.0f);
+            value = addRoundedFloat(value, 2.0f);
+            return truncateFloatToInt32(value);
         }
 
-        int computeHashWidthShiftX87(float mapWidth, float inverseCellWidth) noexcept
+        int computeHashWidthShift(float mapWidth, float inverseCellWidth) noexcept
         {
-            const float widthScaled = (mapWidth - 1.0f) * inverseCellWidth + 1.0f;
+            float widthScaled = subtractRoundedFloat(mapWidth, 1.0f);
+            widthScaled = multiplyRoundedFloat(widthScaled, inverseCellWidth);
+            widthScaled = addRoundedFloat(widthScaled, 1.0f);
+
             int shift = 0;
-            while (x87LessThanOrUnordered(
-                       static_cast<float>(static_cast<std::int32_t>(std::uint32_t{1} << (shift & 31))),
-                       widthScaled))
+            for (;;)
+            {
+                const float power = static_cast<float>(
+                    static_cast<std::int32_t>(std::uint32_t{1} << (shift & 31)));
+                // Game floating-point comparison widthScaled,power + ordered-greater comparison: unordered does not loop.
+                if (std::isnan(widthScaled) || !(widthScaled > power))
+                    break;
                 ++shift;
+            }
             return shift;
+        }
+
+        std::uint32_t retailSaturatedArrayBytes16Plus4(std::uint32_t elementCount) noexcept
+        {
+            // this code path uses unsigned 32-bit multiplication by 0x10, saturates the byte count
+            // to 0xFFFFFFFF on multiply overflow, then does the same for +4.
+            // Do not let C++ uint32 arithmetic wrap to a small allocation.
+            const std::uint64_t product = static_cast<std::uint64_t>(elementCount) * 16u;
+            if (product > 0xFFFFFFFFull)
+                return 0xFFFFFFFFu;
+
+            const std::uint32_t bytes = static_cast<std::uint32_t>(product);
+            if (bytes > 0xFFFFFFFFu - 4u)
+                return 0xFFFFFFFFu;
+            return bytes + 4u;
         }
 
         std::uint32_t abs32Wrap(std::int32_t value) noexcept
@@ -226,17 +325,18 @@ namespace as1
         const float halfMaxY = maxObjectSizeY * 0.5f;
         const int shiftX = constructorPowerShiftFor(halfMaxX);
         const int shiftY = constructorPowerShiftFor(halfMaxY);
-        m_inverseCellWidth = inversePowerOfTwoX87(shiftX);
-        m_inverseCellHeight = inversePowerOfTwoX87(shiftY);
+        m_inverseCellWidth = inversePowerOfTwo(shiftX);
+        m_inverseCellHeight = inversePowerOfTwo(shiftY);
 
-        m_bucketHeight = computeHashHeightCellsX87(mapHeight, m_inverseCellHeight);
-        m_bucketRowShift = computeHashWidthShiftX87(mapWidth, m_inverseCellWidth);
+        m_bucketHeight = computeHashHeightCells(mapHeight, m_inverseCellHeight);
+        m_bucketRowShift = computeHashWidthShift(mapWidth, m_inverseCellWidth);
         m_bucketWidth = static_cast<int>(std::uint32_t{1} << (m_bucketRowShift & 31));
 
         const int total = bucketTableElementCount();
         m_bucketTable = nullptr;
 
-        const std::uint32_t bytes32 = static_cast<std::uint32_t>(total) * 16u + 4u;
+        const std::uint32_t bytes32 =
+            retailSaturatedArrayBytes16Plus4(static_cast<std::uint32_t>(total));
         unsigned char* raw = static_cast<unsigned char*>(
             ::operator new(static_cast<std::size_t>(bytes32), std::nothrow));
         if (!raw)
@@ -518,12 +618,12 @@ namespace as1
         if (!probeVid || objectMoveMask(probeVid) == 0)
             return false;
 
-        std::int32_t x = x87FloatToInt(startX);
-        std::int32_t y = x87FloatToInt(startY);
-        std::int32_t currentZ = x87FloatToInt(startZ);
-        const std::int32_t targetXi = x87FloatToInt(*targetX);
-        const std::int32_t targetYi = x87FloatToInt(*targetY);
-        const std::int32_t targetZi = x87FloatToInt(*targetZ);
+        std::int32_t x = truncateFloatToInt32(startX);
+        std::int32_t y = truncateFloatToInt32(startY);
+        std::int32_t currentZ = truncateFloatToInt32(startZ);
+        const std::int32_t targetXi = truncateFloatToInt32(*targetX);
+        const std::int32_t targetYi = truncateFloatToInt32(*targetY);
+        const std::int32_t targetZi = truncateFloatToInt32(*targetZ);
 
         std::uint32_t major = abs32Wrap(wrapSub32(targetXi, x));
         std::uint32_t minor = abs32Wrap(wrapSub32(targetYi, y));
@@ -679,17 +779,20 @@ namespace as1
 
     int SPRITE_COLLECTOR_HASH_MAP::ftolClamp(float scaled, int limit) noexcept
     {
-        return x87FloatToIntClamped(scaled, limit);
+        return retailCellIndexFromScaled(scaled, limit);
     }
 
     int SPRITE_COLLECTOR_HASH_MAP::constructorPowerShiftFor(float value) noexcept
     {
 
         int shift = 0;
-        while (x87LessThanOrUnordered(
-                   static_cast<float>(static_cast<std::int32_t>(std::uint32_t{1} << (shift & 31))),
-                   value))
+        for (;;)
         {
+            const float power = static_cast<float>(
+                static_cast<std::int32_t>(std::uint32_t{1} << (shift & 31)));
+            // this code path loops only on ordered value > power (ordered greater-than comparison).
+            if (std::isnan(value) || !(value > power))
+                break;
             ++shift;
         }
         return shift;
@@ -698,12 +801,12 @@ namespace as1
     int SPRITE_COLLECTOR_HASH_MAP::cellX(float x) const noexcept
     {
 
-        return x87MultiplyToIntClamped(x, m_inverseCellWidth, m_bucketWidth);
+        return retailMultiplyToCell(x, m_inverseCellWidth, m_bucketWidth);
     }
 
     int SPRITE_COLLECTOR_HASH_MAP::cellY(float y) const noexcept
     {
-        return x87MultiplyToIntClamped(y, m_inverseCellHeight, m_bucketHeight);
+        return retailMultiplyToCell(y, m_inverseCellHeight, m_bucketHeight);
     }
 
     void SPRITE_COLLECTOR_HASH_MAP::setIteratorCellWindow(int minX, int minY, int maxX, int maxY) noexcept
@@ -723,12 +826,12 @@ namespace as1
                                                                          float maxY) noexcept
     {
 
-        const float cellW = x87ReciprocalStored(m_inverseCellWidth);
+        const float cellW = retailReciprocalStored(m_inverseCellWidth);
 
-        const int rawMinX = x87SubtractMultiplyToIntClamped(minX, cellW, m_inverseCellWidth, m_bucketWidth);
-        const int rawMinY = x87SubtractReciprocalMultiplyToIntClamped(minY, m_inverseCellHeight, m_bucketHeight);
-        const int rawMaxX = x87AddMultiplyToIntClamped(maxX, cellW, m_inverseCellWidth, m_bucketWidth);
-        const int rawMaxY = x87AddReciprocalMultiplyToIntClamped(maxY, m_inverseCellHeight, m_bucketHeight);
+        const int rawMinX = retailSubtractMultiplyToCell(minX, cellW, m_inverseCellWidth, m_bucketWidth);
+        const int rawMinY = retailSubtractReciprocalMultiplyToCell(minY, m_inverseCellHeight, m_bucketHeight);
+        const int rawMaxX = retailAddMultiplyToCell(maxX, cellW, m_inverseCellWidth, m_bucketWidth);
+        const int rawMaxY = retailAddReciprocalMultiplyToCell(maxY, m_inverseCellHeight, m_bucketHeight);
 
         setIteratorCellWindow(rawMinX, rawMinY, rawMaxX, rawMaxY);
     }

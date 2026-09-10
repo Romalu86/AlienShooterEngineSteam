@@ -9,6 +9,7 @@
 #include <cmath>
 #include <cstdint>
 #include <limits>
+#include <xmmintrin.h>
 
 #include <new>
 
@@ -20,15 +21,15 @@ namespace as1
 {
     namespace
     {
-        int retailFtolLow32ForVidLight(float value) noexcept
+        int vidConvertFloatToInt32Light(float value) noexcept
         {
-            const long double d = static_cast<long double>(value);
-            if (!std::isfinite(d) ||
-                d < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                d > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (std::isnan(value) || value >= 2147483648.0f || value < -2147483648.0f)
+                return std::numeric_limits<int>::min();
+            return static_cast<int>(value);
+#endif
         }
     }
     float spriteCameraRelativeX(const SPRITE* sprite) noexcept
@@ -101,8 +102,8 @@ namespace as1
         if (resource->GoNext(RESOURCE::ResTypes::DATA) != 0)
             (void)owner->logVidResourceError(5, "DATA", 0);
 
-        owner->setVidWidth(static_cast<short>(retailFtolLow32ForVidLight(owner->sizeX())));
-        owner->setVidHeight(static_cast<short>(retailFtolLow32ForVidLight(owner->sizeY())));
+        owner->setVidWidth(static_cast<short>(vidConvertFloatToInt32Light(owner->sizeX())));
+        owner->setVidHeight(static_cast<short>(vidConvertFloatToInt32Light(owner->sizeY())));
 
         void* rawData = owner->lightData();
         const DWORD byteCount = static_cast<DWORD>(resource->SubLoad(&rawData, nullptr));
@@ -178,7 +179,7 @@ namespace as1
 
     bool VID_LIGHT::isLoaded() const
     {
-        // loadVidLightData stores the physical DATA allocation at [VID+0x420].
+        // loadVidLightData stores the physical light-data allocation on the VID owner.
         return m_lightData != nullptr;
     }
 }

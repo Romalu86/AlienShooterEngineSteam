@@ -20,11 +20,12 @@ namespace as1
     namespace
     {
 
-        std::uint32_t manFrameDeltaMilliseconds(const VID* vid) noexcept
+        std::uint32_t manFrameDeltaMilliseconds(const VID* vid, int animation) noexcept
         {
             const std::uint32_t delta = as1::core::CurrentTimeMilliseconds() - as1::core::PreviousWorldTimeMilliseconds();
-            const std::uint32_t frameDefault = static_cast<std::uint32_t>(vid->defaultFrameSpeed());
-            return std::max(delta, frameDefault);
+            const std::uint32_t frameSpeed =
+                static_cast<std::uint32_t>(vid->hostFrameSpeedStorage(animation));
+            return std::max(delta, frameSpeed);
         }
 
         int manRandModulo(int divisor) noexcept
@@ -110,7 +111,7 @@ namespace as1
 
     int AVIA::updateFlightCombatBehavior() noexcept
     {
-        const std::uint32_t deltaMs = manFrameDeltaMilliseconds(Vid());
+        const std::uint32_t deltaMs = manFrameDeltaMilliseconds(Vid(), currentAnimation());
         int result = computeAttackDecisionCode(deltaMs);
         setAttackDecisionCode(result);
 
@@ -133,7 +134,7 @@ namespace as1
     int AVIA::faceFlightTargetAndUpdateCombat() noexcept
     {
         SPRITE* const target = goalSprite();
-        const std::uint32_t deltaMs = manFrameDeltaMilliseconds(Vid());
+        const std::uint32_t deltaMs = manFrameDeltaMilliseconds(Vid(), currentAnimation());
         const int direction = RetailDirectionFromFloatXY(
             target->X() - X(), target->Y() - Y()).Int();
         const int turnResult = RotateTact(ANGLE(static_cast<unsigned char>(direction)), deltaMs).Int();
@@ -150,20 +151,16 @@ namespace as1
         const float maxZSpeed = vid->maximumZSpeed();
 
         const float lowerGround = mapOwner()->GetGroundZ(vid, VECTOR2{X(), Y()}, Direction());
-        const double lower = static_cast<double>(lowerGround) +
-                             static_cast<double>(vid->moveUpZ()) - 10.0;
-        // `test ah,41h` after fcomp: only ordered-greater reaches +maxZSpeed.
-        if (!std::isnan(lower) && !std::isnan(Z()) && lower > static_cast<double>(Z()))
+        const float lower = (vid->moveUpZ() + lowerGround) - 10.0f;
+        if (lower > Z())
         {
             setZSpeedDirect(maxZSpeed);
             return;
         }
 
         const float upperGround = mapOwner()->GetGroundZ(vid, VECTOR2{X(), Y()}, Direction());
-        const double upper = static_cast<double>(upperGround) +
-                             static_cast<double>(vid->moveUpZ()) + 10.0;
-        if (!std::isnan(upper) && !std::isnan(Z()) &&
-            static_cast<double>(Z()) > upper)
+        const float upper = (vid->moveUpZ() + upperGround) + 10.0f;
+        if (Z() > upper)
         {
             setZSpeedDirect(-maxZSpeed);
             return;

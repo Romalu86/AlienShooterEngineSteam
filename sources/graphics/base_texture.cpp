@@ -171,8 +171,9 @@ namespace as1
 #ifdef _WIN32
         if (m_nativeHandle)
         {
-            if (IDirect3DDevice8* const device = currentTextureDevice())
-                (void)device->SetTexture(0u, nullptr);
+            // The game logic calls through the global D3D device directly;
+            // there is no detached-device guard in this destructor path.
+            (void)currentTextureDevice()->SetTexture(0u, nullptr);
 
             const ULONG refs = m_nativeHandle->Release();
             if (refs != 0u)
@@ -184,10 +185,10 @@ namespace as1
                 const DWORD bytesPerPixel = m_format == 0x29u ? 1u : 2u;
                 const DWORD bytes = static_cast<DWORD>(m_width) *
                     static_cast<DWORD>(m_height) * bytesPerPixel;
-                g_baseTextureRuntimeGlobals.nativeTextureBytes =
-                    g_baseTextureRuntimeGlobals.nativeTextureBytes > bytes
-                        ? g_baseTextureRuntimeGlobals.nativeTextureBytes - bytes
-                        : 0u;
+                // The game logic performs a plain 32-bit subtraction on the global
+                // counter after a successful final Release.  Do not saturate
+                // underflow to zero: unsigned wrap is part of the retail ABI.
+                g_baseTextureRuntimeGlobals.nativeTextureBytes -= bytes;
             }
             m_nativeHandle = nullptr;
         }
@@ -281,20 +282,19 @@ namespace as1
     DWORD BASE_TEXTURE::NativeTextureBytesAfterCreate(int width, int height, DWORD format, DWORD currentBytes)
     {
 
-        if (width <= 0 || height <= 0)
-            return currentBytes;
         const DWORD bytesPerPixel = (format == 41u) ? 1u : 2u;
+        // The game logic uses integer multiply/add low-32 semantics after successful
+        // texture creation; no saturating/validity fallback is applied here.
         return currentBytes + static_cast<DWORD>(width) * static_cast<DWORD>(height) * bytesPerPixel;
     }
 
     DWORD BASE_TEXTURE::NativeTextureBytesAfterRelease(int width, int height, DWORD format, DWORD currentBytes)
     {
 
-        if (width <= 0 || height <= 0)
-            return currentBytes;
         const DWORD bytesPerPixel = (format == 41u) ? 1u : 2u;
         const DWORD delta = static_cast<DWORD>(width) * static_cast<DWORD>(height) * bytesPerPixel;
-        return currentBytes > delta ? currentBytes - delta : 0u;
+        // Same unsigned subtraction semantics as The game logic.
+        return currentBytes - delta;
     }
 
     BaseTextureCreateState BASE_TEXTURE::MakeCreateState(int width, int height, DWORD format, DWORD flags)

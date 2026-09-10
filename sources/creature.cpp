@@ -36,7 +36,7 @@ namespace as1
             return !std::isnan(lhs) && !std::isnan(rhs) && lhs == rhs;
         }
 
-        bool creatureX87LessOrUnordered(long double lhs, long double rhs) noexcept
+        bool creatureLessOrUnordered(long double lhs, long double rhs) noexcept
         {
             return std::isnan(lhs) || std::isnan(rhs) || lhs < rhs;
         }
@@ -62,7 +62,7 @@ namespace as1
                     VID* const candidateVid = candidate->Vid();
                     if (candidateVid->spriteClassId() != B_CREATURE)
                         continue;
-                    if (creatureX87LessOrUnordered(
+                    if (creatureLessOrUnordered(
                             approximatePlanarDistance(X() - candidate->X(), Y() - candidate->Y()), 150.0L))
                         candidate->StartMove();
                 }
@@ -259,10 +259,11 @@ namespace as1
 
         if (CanPlaceWithCrush(candidate.x, candidate.y, candidate.z) != nullptr)
         {
-            dispatchVirtualAction(ActionCode::ACT_PATH_BLOCK,
-                                     static_cast<int>(candidate.x - X()),
-                                     static_cast<int>(candidate.y - Y()),
-                                     static_cast<int>(candidate.z - Z()));
+            // The game logic stops here; it does not invoke the generic
+            // ACT_PATH_BLOCK axis-slide handler.
+            setSpeedDirect(0.0f);
+            if (turnTimer() == 0)
+                setTurnTimer(10);
             return;
         }
 
@@ -277,10 +278,9 @@ namespace as1
                 SPRITE* const nextRegion = findContainingRegion(candidate.x, candidate.y);
                 if (!nextRegion || nextRegion->Vid() != m_currentRegion->Vid())
                 {
-                    dispatchVirtualAction(ActionCode::ACT_PATH_BLOCK,
-                                             static_cast<int>(candidate.x - X()),
-                                             static_cast<int>(candidate.y - Y()),
-                                             static_cast<int>(candidate.z - Z()));
+                    setSpeedDirect(0.0f);
+                    if (turnTimer() == 0)
+                        setTurnTimer(10);
                     return;
                 }
                 m_currentRegion = nextRegion;

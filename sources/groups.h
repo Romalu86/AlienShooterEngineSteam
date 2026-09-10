@@ -39,7 +39,7 @@ namespace as1
         float m_centerY;          // +0x14
         std::uint32_t m_raw18;
         std::uint32_t m_raw1C;
-        Group* m_next;            // +0x20 (x86)
+        Group* m_next;            // +0x20 (32-bit)
     };
 
     class GROUPS : public Group

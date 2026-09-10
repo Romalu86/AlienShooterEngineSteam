@@ -14,6 +14,10 @@
 #include <array>
 #include <new>
 
+#if defined(_MSC_VER) && defined(_M_IX86)
+#include <xmmintrin.h>
+#endif
+
 namespace as1
 {
     namespace core
@@ -68,16 +72,30 @@ namespace as1
                                                  static_cast<std::uint32_t>(div2TowardZero(minor)));
             }
 
-            double approxDistanceSpriteToDot(const SPRITE* sprite, const WeakController* dot) noexcept
+            float approxDistanceSpriteToDot(const SPRITE* sprite, const WeakController* dot) noexcept
             {
                 const float dx = std::fabs(sprite->X() - static_cast<float>(dot->x()));
                 const float dy = std::fabs(sprite->Y() - static_cast<float>(dot->y()));
-                // COMISS dx,dy / JBE takes the half-dx branch for <= *and*
+                // floating-point comparison dx,dy / ordered comparison takes the half-dx branch for <= *and*
                 // unordered.  !(dx > dy) preserves the unordered branch choice.
                 const float result = !(dx > dy)
                     ? (dx * 0.5f + dy)
                     : (dx + dy * 0.5f);
-                return static_cast<double>(result);
+                return result;
+            }
+
+            int weakTruncateFloatToInt32(float value) noexcept
+            {
+#if defined(_MSC_VER) && defined(_M_IX86)
+                return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+                // truncating float-to-int conversion returns the integer-indefinite value for NaN/out-of-range.
+                if (!std::isfinite(value) ||
+                    value < -2147483648.0f ||
+                    value >= 2147483648.0f)
+                    return static_cast<int>(0x80000000u);
+                return static_cast<int>(value);
+#endif
             }
 
             std::int32_t sub32Wrap(std::int32_t a, std::int32_t b) noexcept
@@ -97,7 +115,7 @@ namespace as1
                 return static_cast<std::int32_t>((u ^ mask) - mask);
             }
 
-            int weakFtolLow32(float value) noexcept
+            int weakConvertFloatToInt32(float value) noexcept
             {
                 const long double d = static_cast<long double>(value);
                 if (!std::isfinite(d) ||
@@ -108,7 +126,7 @@ namespace as1
                 return static_cast<int>(static_cast<std::uint32_t>(static_cast<std::uint64_t>(converted)));
             }
 
-            int weakFtolLow32(double value) noexcept
+            int weakConvertFloatToInt32(double value) noexcept
             {
                 if (!std::isfinite(value) ||
                     value < static_cast<double>(INT64_MIN) ||
@@ -738,13 +756,14 @@ namespace as1
             const std::int32_t threeDy = add32Wrap(dy, add32Wrap(dy, dy));
             const std::int32_t dxValue = sub32Wrap(static_cast<std::int32_t>(x), self->m_x);
 
-            const long double projected =
-                static_cast<long double>(threeDy) *
-                    static_cast<long double>(SPRITE::rawDirectionSin(static_cast<int>(tableIndex))) *
-                    0.5L +
-                static_cast<long double>(dxValue) *
-                    static_cast<long double>(SPRITE::rawDirectionCos(static_cast<int>(tableIndex)));
-            return static_cast<int>(static_cast<long long>(projected));
+            // The game logic: integer-to-float conversion -> single-precision multiplication -> single-precision multiplication 0.5
+            // + single-precision multiplication -> single-precision addition -> truncating float-to-int conversion.  Keep the projection binary32.
+            float projectedY = static_cast<float>(threeDy);
+            projectedY *= SPRITE::rawDirectionSin(static_cast<int>(tableIndex));
+            projectedY *= 0.5f;
+            float projectedX = static_cast<float>(dxValue);
+            projectedX *= SPRITE::rawDirectionCos(static_cast<int>(tableIndex));
+            return weakTruncateFloatToInt32(projectedY + projectedX);
         }
 
         int distanceToLink(WeakController* self, int x, int y, int z, int edgeIndex) noexcept
@@ -1039,22 +1058,20 @@ namespace as1
                 if ((g_pathActionBucket == 28 || g_pathActionBucket == 29) && g_pathTargetSprite &&
                     (!self->m_ownerSprite || (g_pathRouteOwner && g_pathRouteOwner->isInEngineChain(self->m_ownerSprite))))
                 {
-                    const int currentDistance = weakFtolLow32(approxDistanceSpriteToDot(g_pathTargetSprite, self));
-                    if (currentDistance <= g_pathMinimumDistance)
+                    const int currentDistance = weakTruncateFloatToInt32(
+                        approxDistanceSpriteToDot(g_pathTargetSprite, self));
+                    if (currentDistance <= g_pathMinimumDistance && g_pathResultScore > g_pathCost)
                     {
-                        bool accept = true;
+                        // The game logic still evaluates/spills this distance when a
+                        // best node exists, but the value is not part of the publish gate.
                         if (g_pathBestNode)
                         {
-                            const double bestDistance = approxDistanceSpriteToDot(g_pathTargetSprite, g_pathBestNode);
-                            if (bestDistance <= currentDistance && g_pathResultScore <= g_pathCost)
-                                accept = false;
+                            volatile float retailUnusedBestDistance =
+                                approxDistanceSpriteToDot(g_pathTargetSprite, g_pathBestNode);
+                            (void)retailUnusedBestDistance;
                         }
-                        else if (g_pathResultScore <= g_pathCost)
-                        {
-                            accept = false;
-                        }
-                        if (accept)
-                            publishPathCandidate(self, static_cast<unsigned int>(g_pathDepth), g_pathCost, g_pathMinimumDistance, &resultIndex);
+                        publishPathCandidate(self, static_cast<unsigned int>(g_pathDepth),
+                                             g_pathCost, g_pathMinimumDistance, &resultIndex);
                     }
                 }
             }
@@ -1092,8 +1109,8 @@ namespace as1
                     bool replaceBest = g_pathBestNode == nullptr;
                     if (g_pathBestNode)
                     {
-                        const double oldDistance = approxDistanceSpriteToDot(g_pathTargetSprite, g_pathBestNode);
-                        const double newDistance = approxDistanceSpriteToDot(g_pathTargetSprite, self);
+                        const float oldDistance = approxDistanceSpriteToDot(g_pathTargetSprite, g_pathBestNode);
+                        const float newDistance = approxDistanceSpriteToDot(g_pathTargetSprite, self);
                         replaceBest = oldDistance > newDistance ||
                                       (g_pathBestNode == self && g_pathSecondaryBestCost > g_pathCost);
                     }
@@ -1275,14 +1292,17 @@ namespace as1
                 initializePathSearch(&globalWeakControllerMap(), firstNode, secondSprite,
                            static_cast<int>((routeOwner->runtimeFlags() >> 2) & 31u), routeOwner);
 
-                const long double dx = firstNode
-                    ? std::fabs(static_cast<long double>(routeOwner->X()) - static_cast<long double>(firstNode->m_x))
-                    : std::fabs(static_cast<long double>(routeOwner->X()) - static_cast<long double>(secondSprite->X()));
-                const long double dy = firstNode
-                    ? std::fabs(static_cast<long double>(routeOwner->Y()) - static_cast<long double>(firstNode->m_y))
-                    : std::fabs(static_cast<long double>(routeOwner->Y()) - static_cast<long double>(secondSprite->Y()));
-                const long double approx = dx <= dy ? dx * 0.5L + dy : dx + dy * 0.5L;
-                g_pathDepthLimit = static_cast<int>(approx * 0.1L);
+                // The game logic keeps this path-depth heuristic in binary32,
+                // divides by 10.0f and converts with truncating float-to-int conversion.  Extended precision
+                // or multiplying by a reciprocal changes boundary results.
+                const float dx = firstNode
+                    ? std::fabs(routeOwner->X() - static_cast<float>(firstNode->m_x))
+                    : std::fabs(routeOwner->X() - secondSprite->X());
+                const float dy = firstNode
+                    ? std::fabs(routeOwner->Y() - static_cast<float>(firstNode->m_y))
+                    : std::fabs(routeOwner->Y() - secondSprite->Y());
+                const float approx = !(dx > dy) ? dx * 0.5f + dy : dx + dy * 0.5f;
+                g_pathDepthLimit = weakTruncateFloatToInt32(approx / 10.0f);
 
                 const int oldToNew = findLinkIndex(oldNode, self->node);
                 const unsigned char facing = static_cast<unsigned char>(oldNode->m_links[static_cast<std::size_t>(oldToNew)].facing);
@@ -1521,9 +1541,9 @@ namespace as1
         WeakController* createOrRetainNode(WeakControllerMap* self, float x, float y, float id)
         {
 
-            const int ix = weakFtolLow32(x);
-            const int iy = weakFtolLow32(y);
-            const int iid = weakFtolLow32(id);
+            const int ix = weakConvertFloatToInt32(x);
+            const int iy = weakConvertFloatToInt32(y);
+            const int iid = weakConvertFloatToInt32(id);
 
             if (WeakController* existing = findNodeNearCoordinates(self, ix, iy, iid))
             {
@@ -1678,7 +1698,7 @@ namespace as1
 
         void AS1_WEAK_FASTCALL releaseWeakControllerThunk(WeakController* self) noexcept
         {
-            // Non-MSVC/non-x86 builds use the portable fallback.
+            // Non-MSVC/non-32-bit builds use the portable fallback.
             releaseWeakController(self);
         }
 

@@ -994,7 +994,7 @@ namespace as1 { namespace thirdparty { namespace xiph2003
 
         int clampSigned16(float value)
         {
-            // Same x87 FISTP contract as the retail 16-bit conversion paths.
+            // Use the same rounded integer-conversion behavior as the 16-bit conversion paths.
             int sample = static_cast<int>(std::lrint(static_cast<double>(value) * 32768.0));
             if (sample > 0x7FFF)
                 sample = 0x7FFF;

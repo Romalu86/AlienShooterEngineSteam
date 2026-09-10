@@ -30,6 +30,9 @@
 #include <cstdio>
 #include <cstring>
 #include <cstdlib>
+#if defined(_MSC_VER) && defined(_M_IX86)
+#include <xmmintrin.h>
+#endif
 #include <sstream>
 #include <unordered_map>
 
@@ -52,7 +55,7 @@
 
 namespace as1
 {
-    int graphRetailFtolLow32(float value) noexcept;
+    int graphConvertFloatToInt32(float value) noexcept;
 
 #if !defined(_MSC_VER) || !defined(_M_IX86)
     struct GraphHostState
@@ -162,8 +165,6 @@ namespace as1
 
         std::uint32_t g_moviePlaybackFrame = 0u;
         std::uint32_t g_moviePlaybackLastTime = 0u;
-
-        char g_d3dFormatNameBuffer[256] = "Unknown";
 
         GammaRawPair graphLegacyGammaIndexToRaw(std::uint32_t packed)
         {
@@ -350,7 +351,7 @@ namespace as1
 
         int signedHalfFromFloatTowardZero(float value)
         {
-            return signedHalfTowardZero(graphRetailFtolLow32(value));
+            return signedHalfTowardZero(graphConvertFloatToInt32(value));
         }
 
         DWORD floatRaw(float value)
@@ -604,14 +605,18 @@ namespace as1
     }
 
 
-    int graphRetailFtolLow32(float value) noexcept
+    int graphConvertFloatToInt32(float value) noexcept
     {
-        const double d = static_cast<double>(value);
-        if (!std::isfinite(d) ||
-            d >= 9223372036854775808.0 || d < -9223372036854775808.0)
-            return 0;
-        const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-        return static_cast<int>(static_cast<std::uint32_t>(converted));
+#if defined(_MSC_VER) && defined(_M_IX86)
+        // The game graph raster/viewport paths use truncating float-to-int conversion directly.
+        // Preserve integer-indefinite (0x80000000) for NaN/out-of-range
+        // Use direct truncating conversion and preserve invalid-input behavior.
+        return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+        if (std::isnan(value) || value >= 2147483648.0f || value < -2147483648.0f)
+            return std::numeric_limits<int>::min();
+        return static_cast<int>(value);
+#endif
     }
 
     bool graphRetailFcompC3Equal(float lhs, float rhs) noexcept
@@ -1242,14 +1247,9 @@ namespace as1
     {
 
 
-        for (GraphAdapterRecord& record : m_adapterRecords)
-        {
-            record.description[0] = '\0';
-            record.displayModeCount = 0u;
-            DWORD oldCaps = 0u;
-            std::memcpy(&oldCaps, &record.capabilityFlags, sizeof(oldCaps));
-            record.capabilityFlags = oldCaps & 0xFFFFFFF0u;
-        }
+        // The game (this code path) zeroes the entire 8-entry adapter block in one pass.
+        // Reset the entire adapter block so no stale fields survive initialization.
+        std::memset(m_adapterRecords, 0, sizeof(m_adapterRecords));
 
         m_effectGammaPair.first = 0u;
         m_effectGammaPair.second = 0u;
@@ -1296,7 +1296,8 @@ namespace as1
         m_direct3D = Direct3DCreate9(D3D_SDK_VERSION);
         if (!m_direct3D)
         {
-            logAndShowError(g_fileLogger, "Can't create Direct3D9");
+            // The game executable still carries this legacy D3D8 wording even though it calls Direct3DCreate9.
+            logAndShowError(g_fileLogger, "Can't create Direct3D8");
             return this;
         }
 
@@ -1308,12 +1309,57 @@ namespace as1
             buildAdapterRecord(m_adapterRecords[adapter], d3d, static_cast<int>(adapter), startupSettings);
             ++m_adapterCount;
         }
+
+        // The game logic: adapter zero is the constructor default.  The initial
+        // resolution is selected from the raw D3D mode list by the closest desktop aspect
+        // ratio, with a maximum width of 1280.  StartupSettings.screenWidth/screenHeight,
+        // colorDepth and device are not consumed by this constructor path.
+        m_selectedAdapterIndex = 0;
+        m_sizeX = 999999.0f;
+        m_sizeY = 1.0f;
+
+        D3DADAPTER_IDENTIFIER8 identifier{};
+        D3DDISPLAYMODE desktopMode{};
+        (void)d3d->GetAdapterIdentifier(0u, 0u, &identifier);
+        (void)d3d->GetAdapterDisplayMode(0u, &desktopMode);
+        LOG::Write("find adapter '%s'", identifier.Description);
+
+        const float desktopWidth = static_cast<float>(::GetSystemMetrics(SM_CXSCREEN));
+        const float desktopHeight = static_cast<float>(::GetSystemMetrics(SM_CYSCREEN));
+        const float targetAspect = desktopWidth / desktopHeight;
+        const UINT modeCount = d3d->GetAdapterModeCount(0u, D3DFMT_X8R8G8B8);
+        for (UINT modeIndex = modeCount; modeIndex > 0u; --modeIndex)
+        {
+            D3DDISPLAYMODE mode{};
+            (void)d3d->EnumAdapterModes(0u, D3DFMT_X8R8G8B8, modeIndex - 1u, &mode);
+            if (mode.Format != D3DFMT_X8R8G8B8 && mode.Format != D3DFMT_A8R8G8B8)
+                continue;
+
+            // Duplicate modes are detected by exact width and height equality.
+            if (m_sizeX == static_cast<float>(mode.Width) &&
+                m_sizeY == static_cast<float>(mode.Height))
+                continue;
+            if (mode.Width > 1280u)
+                continue;
+
+            const float currentError = std::fabs((m_sizeX / m_sizeY) - targetAspect);
+            const float candidateError = std::fabs(
+                (static_cast<float>(mode.Width) / static_cast<float>(mode.Height)) - targetAspect);
+            if (currentError > candidateError)
+            {
+                LOG::Write("   find display modes %ix%i %s",
+                           static_cast<int>(mode.Width),
+                           static_cast<int>(mode.Height),
+                           D3DFormatToString(static_cast<DWORD>(mode.Format)));
+                m_sizeX = static_cast<float>(mode.Width);
+                m_sizeY = static_cast<float>(mode.Height);
+            }
+        }
 #endif
 
-        m_selectedAdapterIndex = startupSettings.device;
-        m_sizeX = static_cast<float>(startupSettings.screenWidth);
-        m_sizeY = static_cast<float>(startupSettings.screenHeight);
-        m_graphFlags = (m_graphFlags & 0xFFFFFFFDu) | (startupSettings.colorDepth == 32 ? 0x2u : 0u);
+        // Steam forces the initial 32-bit-color flag and only takes fullscreen from
+        // StartupSettings here; the start dialog may subsequently change the mode.
+        m_graphFlags |= 0x2u;
         m_graphFlags = (m_graphFlags & ~0x10u) | (startupSettings.fullscreen != 0 ? 0x10u : 0u);
         if (m_selectedAdapterIndex >= static_cast<int>(m_adapterCount))
             m_selectedAdapterIndex = 0;
@@ -1348,43 +1394,41 @@ namespace as1
 
     const char* GRAPH::D3DFormatToString(DWORD format)
     {
-
-        const char* source = nullptr;
+        // this code path in the game executable returns an independent STRING.  Returning
+        // literals here preserves that observable behavior for callers that retain
+        // several format names at once (the former shared buffer aliased them).
         switch (format)
         {
-        case 20: source = "R8G8B8"; break;
-        case 21: source = "A8R8G8B8"; break;
-        case 22: source = "X8R8G8B8"; break;
-        case 23: source = "R5G6B5"; break;
-        case 24: source = "X1R5G5B5"; break;
-        case 25: source = "A1R5G5B5"; break;
-        case 26: source = "A4R4G4B4"; break;
-        case 28: source = "A8"; break;
-        case 40: source = "A8P8"; break;
-        case 41: source = "P8"; break;
-        case 50: source = "L8"; break;
-        case 51: source = "A8L8"; break;
-        case 52: source = "A4L4"; break;
-        case 60: source = "V8U8"; break;
-        case 70: source = "D16_LOCKABLE"; break;
-        case 71: source = "D32"; break;
-        case 73: source = "D15S1"; break;
-        case 75: source = "D24S8"; break;
-        case 77: source = "D24X8"; break;
-        case 80: source = "D16"; break;
-        case 100: source = "VERTEXDATA"; break;
-        case 101: source = "INDEX16"; break;
-        case 102: source = "INDEX32"; break;
-        case 0x31545844u: source = "DXT1"; break;
-        case 0x32545844u: source = "DXT2"; break;
-        case 0x33545844u: source = "DXT3"; break;
-        case 0x34545844u: source = "DXT4"; break;
-        case 0x35545844u: source = "DXT5"; break;
-        default: break;
+        case 20: return "R8G8B8";
+        case 21: return "A8R8G8B8";
+        case 22: return "X8R8G8B8";
+        case 23: return "R5G6B5";
+        case 24: return "X1R5G5B5";
+        case 25: return "A1R5G5B5";
+        case 26: return "A4R4G4B4";
+        case 28: return "A8";
+        case 40: return "A8P8";
+        case 41: return "P8";
+        case 50: return "L8";
+        case 51: return "A8L8";
+        case 52: return "A4L4";
+        case 60: return "V8U8";
+        case 70: return "D16_LOCKABLE";
+        case 71: return "D32";
+        case 73: return "D15S1";
+        case 75: return "D24S8";
+        case 77: return "D24X8";
+        case 80: return "D16";
+        case 100: return "VERTEXDATA";
+        case 101: return "INDEX16";
+        case 102: return "INDEX32";
+        case 0x31545844u: return "DXT1";
+        case 0x32545844u: return "DXT2";
+        case 0x33545844u: return "DXT3";
+        case 0x34545844u: return "DXT4";
+        case 0x35545844u: return "DXT5";
+        default: return "Unknown";
         }
-        if (source)
-            std::strcpy(g_d3dFormatNameBuffer, source);
-        return g_d3dFormatNameBuffer;
     }
 
     namespace
@@ -1649,10 +1693,10 @@ namespace as1
         state.right = m_viewportRight;
         state.top = m_viewportTop;
         state.bottom = m_viewportBottom;
-        state.viewportX = static_cast<DWORD>(graphRetailFtolLow32(m_viewportLeft));
-        state.viewportY = static_cast<DWORD>(graphRetailFtolLow32(m_viewportTop));
-        state.viewportWidth = static_cast<DWORD>(graphRetailFtolLow32(m_viewportRight - m_viewportLeft));
-        state.viewportHeight = static_cast<DWORD>(graphRetailFtolLow32(m_viewportBottom - m_viewportTop));
+        state.viewportX = static_cast<DWORD>(graphConvertFloatToInt32(m_viewportLeft));
+        state.viewportY = static_cast<DWORD>(graphConvertFloatToInt32(m_viewportTop));
+        state.viewportWidth = static_cast<DWORD>(graphConvertFloatToInt32(m_viewportRight - m_viewportLeft));
+        state.viewportHeight = static_cast<DWORD>(graphConvertFloatToInt32(m_viewportBottom - m_viewportTop));
         state.minZ = 0.0f;
         state.maxZ = 1.0f;
         return state;
@@ -1753,8 +1797,8 @@ namespace as1
             !(y < static_cast<double>(m_viewportBottom) - 1.0))
             return;
 
-        const int ix = graphRetailFtolLow32(x);
-        const int iy = graphRetailFtolLow32(y);
+        const int ix = graphConvertFloatToInt32(x);
+        const int iy = graphConvertFloatToInt32(y);
         if ((m_graphFlags & 2u) != 0u)
         {
             DWORD* const pixels = static_cast<DWORD*>(m_lockedBackBufferPixels);
@@ -1789,8 +1833,8 @@ namespace as1
             return colorOut;
         }
 
-        const int ix = graphRetailFtolLow32(x);
-        const int iy = graphRetailFtolLow32(y);
+        const int ix = graphConvertFloatToInt32(x);
+        const int iy = graphConvertFloatToInt32(y);
         const std::ptrdiff_t index = static_cast<std::ptrdiff_t>(ix) +
                                      static_cast<std::ptrdiff_t>(iy) * static_cast<std::ptrdiff_t>(m_backBufferPitchPixels);
         if ((m_graphFlags & 2u) != 0)
@@ -2064,11 +2108,12 @@ namespace as1
 
         IDirect3DSurface8* backBuffer = nullptr;
         const HRESULT backBufferResult = device->GetBackBuffer(0u, 0u, D3DBACKBUFFER_TYPE_MONO, &backBuffer);
+        // The game logic reports this as a normal restore diagnostic.  It does
+        // not route GetBackBuffer failure through the resource-error handler.
+        LOG::Write("  RestoreDeviceObjects(), GetBackBuffer() -> %s",
+                   backBufferResult == D3D_OK ? "SUCCESS" : "FAILED");
         if (backBufferResult != D3D_OK)
-        {
-            LOG::ResourceError("%s", 9, "backBuffer", static_cast<int>(backBufferResult), "GRAPH");
             return 2;
-        }
         m_backBuffer = backBuffer;
 
         if (m_textFont)
@@ -2121,13 +2166,13 @@ namespace as1
         if (cooperative == D3DERR_DEVICELOST)
         {
             reloadPaletteLightBuffer();
-            LOG::ResourceError("%s", 10, "device lost", 0, "GRAPH");
+            LOG::Write("TestCooperativeLevel() -> D3DERR_DEVICELOST");
             return 1;
         }
 
         if (cooperative == D3DERR_DEVICENOTRESET)
         {
-            LOG::ResourceError("%s", 10, "device notreset", 0, "GRAPH");
+            LOG::Write("TestCooperativeLevel() -> D3DERR_DEVICENOTRESET");
             invalidateDeviceObjectsRetail();
 
             D3DPRESENT_PARAMETERS& pp = m_d3d9PresentParameters;
@@ -2270,7 +2315,7 @@ namespace as1
         if (m_softwareDepthBuffer)
         {
 
-            const std::uint32_t heightRaw = static_cast<std::uint32_t>(graphRetailFtolLow32(m_sizeY));
+            const std::uint32_t heightRaw = static_cast<std::uint32_t>(graphConvertFloatToInt32(m_sizeY));
             std::uint32_t wordCount = heightRaw * static_cast<std::uint32_t>(m_softwareDepthPitch);
             std::uint16_t* out = m_softwareDepthBuffer;
             if ((wordCount & 1u) != 0u)
@@ -2348,18 +2393,18 @@ namespace as1
             !graphRetailFcompC0(top, m_viewportBottom))
             return;
 
-        int clippedLeft = graphRetailFtolLow32(left);
-        int clippedTop = graphRetailFtolLow32(top);
-        int clippedRight = graphRetailFtolLow32(right);
-        int clippedBottom = graphRetailFtolLow32(bottom);
+        int clippedLeft = graphConvertFloatToInt32(left);
+        int clippedTop = graphConvertFloatToInt32(top);
+        int clippedRight = graphConvertFloatToInt32(right);
+        int clippedBottom = graphConvertFloatToInt32(bottom);
         if (graphRetailFcompC0(left, m_viewportLeft))
-            clippedLeft = graphRetailFtolLow32(m_viewportLeft);
+            clippedLeft = graphConvertFloatToInt32(m_viewportLeft);
         if (graphRetailFcompC0(top, m_viewportTop))
-            clippedTop = graphRetailFtolLow32(m_viewportTop);
+            clippedTop = graphConvertFloatToInt32(m_viewportTop);
         if (!graphRetailFcompC0(right, m_viewportRight))
-            clippedRight = graphRetailFtolLow32(m_viewportRight);
+            clippedRight = graphConvertFloatToInt32(m_viewportRight);
         if (!graphRetailFcompC0(bottom, m_viewportBottom))
-            clippedBottom = graphRetailFtolLow32(m_viewportBottom);
+            clippedBottom = graphConvertFloatToInt32(m_viewportBottom);
 
         const int width = clippedRight - clippedLeft;
         const int height = clippedBottom - clippedTop;
@@ -2496,8 +2541,8 @@ namespace as1
     {
 
         const core::ApplicationDrawDispatcherState& appDraw = core::GlobalApplicationDrawDispatcherState();
-        const int shiftX = graphRetailFtolLow32(appDraw.cameraShiftX());
-        const int shiftY = graphRetailFtolLow32(appDraw.cameraShiftY());
+        const int shiftX = graphConvertFloatToInt32(appDraw.cameraShiftX());
+        const int shiftY = graphConvertFloatToInt32(appDraw.cameraShiftY());
         const int startX = (-(shiftX & 3)) & 3;
         const int startY = (-(shiftY & 3)) & 3;
 
@@ -2516,8 +2561,8 @@ namespace as1
         if (g_snowLightIntensity < 0x100u)
             g_snowLightIntensity = (now - g_snowLightRampStartTime) >> 7u;
 
-        const int screenWidth = graphRetailFtolLow32(m_sizeX);
-        const int screenHeight = graphRetailFtolLow32(m_sizeY);
+        const int screenWidth = graphConvertFloatToInt32(m_sizeX);
+        const int screenHeight = graphConvertFloatToInt32(m_sizeY);
         RECTI textureRect{0, 0, screenWidth / 4, screenHeight / 4};
         RECTI screenRect{0, 0, screenWidth, screenHeight};
         int texturePitchBytes = 0;
@@ -3072,17 +3117,17 @@ namespace as1
         videoWindow->put_Owner(reinterpret_cast<OAHWND>(hwnd));
         videoWindow->put_WindowStyle(0x44000000L);
 
-        const int top = graphRetailFtolLow32(m_viewportTop);
-        const int left = graphRetailFtolLow32(m_viewportLeft);
-        const int bottom = graphRetailFtolLow32(m_viewportBottom);
-        const int right = graphRetailFtolLow32(m_viewportRight);
+        const int top = graphConvertFloatToInt32(m_viewportTop);
+        const int left = graphConvertFloatToInt32(m_viewportLeft);
+        const int bottom = graphConvertFloatToInt32(m_viewportBottom);
+        const int right = graphConvertFloatToInt32(m_viewportRight);
         videoWindow->SetWindowPosition(left, top, right - left + 1, bottom - top + 1);
 
         IMediaControl* const mediaControl = static_cast<IMediaControl*>(m_movieComObjects[1]);
         (void)mediaControl->Run();
         ::SetCapture(hwnd);
-        const int cursorY = graphRetailFtolLow32(m_sizeY);
-        const int cursorX = graphRetailFtolLow32(m_sizeX);
+        const int cursorY = graphConvertFloatToInt32(m_sizeY);
+        const int cursorX = graphConvertFloatToInt32(m_sizeX);
         return ::SetCursorPos(cursorX, cursorY);
 #else
         (void)moviePath;
@@ -3493,8 +3538,8 @@ namespace as1
             return;
 
         (void)lockBackBuffer();
-        const int ix = graphRetailFtolLow32(x);
-        const int iy = graphRetailFtolLow32(y);
+        const int ix = graphConvertFloatToInt32(x);
+        const int iy = graphConvertFloatToInt32(y);
         const std::ptrdiff_t index = static_cast<std::ptrdiff_t>(ix) +
                                      static_cast<std::ptrdiff_t>(iy) * static_cast<std::ptrdiff_t>(m_backBufferPitchPixels);
 
@@ -3548,13 +3593,13 @@ namespace as1
             y1 = 0.0f;
         }
 
-        int major = graphRetailFtolLow32(x0);
-        int minor = graphRetailFtolLow32(y0);
+        int major = graphConvertFloatToInt32(x0);
+        int minor = graphConvertFloatToInt32(y0);
         int majorStep = (x1 > x0) ? 1 : -1;
         int minorStep = (y1 > y0) ? 1 : -1;
 
-        int dx = std::abs(graphRetailFtolLow32(x1 - x0));
-        int dy = std::abs(graphRetailFtolLow32(y1 - y0));
+        int dx = std::abs(graphConvertFloatToInt32(x1 - x0));
+        int dy = std::abs(graphConvertFloatToInt32(y1 - y0));
         bool axesSwapped = false;
         if (dy > dx)
         {
@@ -3653,10 +3698,10 @@ namespace as1
         m_viewportRight = right;
         m_viewportTop = top;
         m_viewportBottom = bottom;
-        g_softwareClipLeft = graphRetailFtolLow32(left);
-        g_softwareClipRight = graphRetailFtolLow32(right);
-        g_softwareClipTop = graphRetailFtolLow32(top);
-        g_softwareClipBottom = graphRetailFtolLow32(bottom);
+        g_softwareClipLeft = graphConvertFloatToInt32(left);
+        g_softwareClipRight = graphConvertFloatToInt32(right);
+        g_softwareClipTop = graphConvertFloatToInt32(top);
+        g_softwareClipBottom = graphConvertFloatToInt32(bottom);
 
         int result = g_softwareClipBottom;
 #ifdef _WIN32
@@ -3665,17 +3710,23 @@ namespace as1
             return result;
 
         D3DVIEWPORT8 viewport{};
-        viewport.X = static_cast<DWORD>(graphRetailFtolLow32(left));
-        viewport.Y = static_cast<DWORD>(graphRetailFtolLow32(top));
-        viewport.Width = static_cast<DWORD>(graphRetailFtolLow32(right - left));
-        viewport.Height = static_cast<DWORD>(graphRetailFtolLow32(bottom - top));
+        viewport.X = static_cast<DWORD>(graphConvertFloatToInt32(left));
+        viewport.Y = static_cast<DWORD>(graphConvertFloatToInt32(top));
+        viewport.Width = static_cast<DWORD>(graphConvertFloatToInt32(right - left));
+        viewport.Height = static_cast<DWORD>(graphConvertFloatToInt32(bottom - top));
         viewport.MinZ = 0.0f;
         viewport.MaxZ = 1.0f;
 
         result = static_cast<int>(device->SetViewport(&viewport));
-        if (result != D3D_OK)
-            (void)logFileLoggerResourceError(g_fileLogger, "GRAPH", 8, "viewport", result);
+        LOG::Write("SetViewPort(%.0f,%.0f - %.0f,%.0f) -> %s",
+                   static_cast<double>(left),
+                   static_cast<double>(top),
+                   static_cast<double>(right),
+                   static_cast<double>(bottom),
+                   result == D3D_OK ? "SUCCESS" : "FAILED");
 
+        // Retail does not raise ResourceError for SetViewport here; it logs the HRESULT
+        // result and proceeds to the projection transform.
         D3DMATRIX matrix{};
         matrix._11 = 2.0f / static_cast<float>(static_cast<std::int32_t>(viewport.Width));
         matrix._22 = -2.0f / static_cast<float>(static_cast<std::int32_t>(viewport.Height));
@@ -3729,25 +3780,25 @@ namespace as1
 
         if (static_cast<float>(dst.left) < m_viewportLeft)
         {
-            const int clippedLeft = graphRetailFtolLow32(m_viewportLeft);
+            const int clippedLeft = graphConvertFloatToInt32(m_viewportLeft);
             src.left += clippedLeft - dst.left;
             dst.left = clippedLeft;
         }
         if (static_cast<float>(dst.top) < m_viewportTop)
         {
-            const int clippedTop = graphRetailFtolLow32(m_viewportTop);
+            const int clippedTop = graphConvertFloatToInt32(m_viewportTop);
             src.top += clippedTop - dst.top;
             dst.top = clippedTop;
         }
         if (static_cast<float>(dst.right) > m_viewportRight)
         {
-            const int clippedRight = graphRetailFtolLow32(m_viewportRight);
+            const int clippedRight = graphConvertFloatToInt32(m_viewportRight);
             src.right += clippedRight - dst.right;
             dst.right = clippedRight;
         }
         if (static_cast<float>(dst.bottom) > m_viewportBottom)
         {
-            const int clippedBottom = graphRetailFtolLow32(m_viewportBottom);
+            const int clippedBottom = graphConvertFloatToInt32(m_viewportBottom);
             src.bottom += clippedBottom - dst.bottom;
             dst.bottom = clippedBottom;
         }
@@ -4085,107 +4136,106 @@ namespace as1
     int GRAPH::init(void* hWnd)
     {
 #ifdef _WIN32
+        (void)hWnd;
 
-        const int requestedWidth = graphRetailFtolLow32(m_sizeX);
-        const int requestedHeight = graphRetailFtolLow32(m_sizeY);
-        const DWORD requestedColorBits = (m_graphFlags & 0x2u) != 0u ? 32u : 16u;
-        const GraphAdapterRecord& adapterRecord = selectedAdapterRecord();
-        const int modeIndex = adapterRecord.findDisplayModeIndex(
-            requestedWidth,
-            requestedHeight,
-            static_cast<int>(requestedColorBits));
-
-        int effectiveModeIndex = modeIndex;
-        int effectiveWidth = requestedWidth;
-        int effectiveHeight = requestedHeight;
-        if (effectiveModeIndex < 0)
-        {
-            if (adapterRecord.displayModeCount == 0u)
-            {
-                return 1;
-            }
-
-            for (DWORD index = 0; index < adapterRecord.displayModeCount; ++index)
-            {
-                if (static_cast<int>(adapterRecord.displayModeWidths[index]) == requestedWidth &&
-                    static_cast<int>(adapterRecord.displayModeHeights[index]) == requestedHeight)
-                {
-                    effectiveModeIndex = static_cast<int>(index);
-                    break;
-                }
-            }
-            if (effectiveModeIndex < 0)
-                effectiveModeIndex = 0;
-
-            effectiveWidth = static_cast<int>(adapterRecord.displayModeWidths[effectiveModeIndex]);
-            effectiveHeight = static_cast<int>(adapterRecord.displayModeHeights[effectiveModeIndex]);
-            m_sizeX = static_cast<float>(effectiveWidth);
-            m_sizeY = static_cast<float>(effectiveHeight);
-
-            const int fallbackBits = retailDisplayFormatBits(adapterRecord.displayModeFormats[effectiveModeIndex]);
-            if (fallbackBits == 32)
-                m_graphFlags |= 0x2u;
-            else if (fallbackBits == 16)
-                m_graphFlags &= ~0x2u;
-
-        }
-
+        // The game logic builds D3DPRESENT_PARAMETERS directly from the
+        // constructor/dialog-selected size.  It does not re-resolve that size through
+        // the filtered adapter-mode catalog.
         std::memset(&m_d3d9PresentParameters, 0, sizeof(m_d3d9PresentParameters));
         D3DPRESENT_PARAMETERS& pp = m_d3d9PresentParameters;
-        pp.BackBufferWidth = static_cast<UINT>(effectiveWidth);
-        pp.BackBufferHeight = static_cast<UINT>(effectiveHeight);
-        pp.BackBufferFormat = static_cast<D3DFORMAT>(
-            fullscreenRequested()
-                ? adapterRecord.displayModeFormats[effectiveModeIndex]
-                : adapterRecord.desktopDisplayFormat);
+        const GraphAdapterRecord& adapterRecord = selectedAdapterRecord();
+
+        if (fullscreenRequested())
+        {
+            m_adapterDisplayFormat = static_cast<DWORD>(D3DFMT_X8R8G8B8);
+            m_selectedDisplayFormat = static_cast<DWORD>(D3DFMT_A8R8G8B8);
+        }
+        else
+        {
+            m_adapterDisplayFormat = adapterRecord.desktopDisplayFormat;
+            m_selectedDisplayFormat =
+                (adapterRecord.desktopDisplayFormat == static_cast<DWORD>(D3DFMT_X8R8G8B8))
+                    ? static_cast<DWORD>(D3DFMT_A8R8G8B8)
+                    : adapterRecord.desktopDisplayFormat;
+        }
+
+        pp.BackBufferWidth = static_cast<UINT>(graphConvertFloatToInt32(m_sizeX));
+        pp.BackBufferHeight = static_cast<UINT>(graphConvertFloatToInt32(m_sizeY));
+        pp.BackBufferFormat = static_cast<D3DFORMAT>(m_selectedDisplayFormat);
         pp.BackBufferCount = 1u;
         pp.MultiSampleType = D3DMULTISAMPLE_NONE;
         pp.MultiSampleQuality = 0u;
         pp.SwapEffect = D3DSWAPEFFECT_COPY;
         pp.hDeviceWindow = static_cast<HWND>(m_windowHandle);
-        pp.Windowed = !fullscreenRequested() ? TRUE : FALSE;
+        pp.Windowed = fullscreenRequested() ? FALSE : TRUE;
         pp.EnableAutoDepthStencil = TRUE;
-        pp.AutoDepthStencilFormat = static_cast<D3DFORMAT>(adapterRecord.depthStencilFormats[effectiveModeIndex]);
         pp.Flags = D3DPRESENTFLAG_LOCKABLE_BACKBUFFER;
         pp.FullScreen_RefreshRateInHz = 0u;
-        pp.PresentationInterval = ((m_graphFlags & 0x00000020u) != 0u ? D3DPRESENT_INTERVAL_ONE : D3DPRESENT_INTERVAL_IMMEDIATE);
-
-        if (modeIndex < 0)
-        {
-            const int actualBackBufferBits = retailDisplayFormatBits(static_cast<DWORD>(pp.BackBufferFormat));
-            if (actualBackBufferBits == 32)
-                m_graphFlags |= 0x2u;
-            else if (actualBackBufferBits == 16)
-                m_graphFlags &= ~0x2u;
-        }
-
-        m_selectedDisplayFormat = static_cast<DWORD>(pp.BackBufferFormat);
-        m_adapterDisplayFormat = adapterRecord.desktopDisplayFormat;
-        m_depthStencilFormat = static_cast<DWORD>(pp.AutoDepthStencilFormat);
+        pp.PresentationInterval =
+            ((m_graphFlags & 0x00000020u) != 0u)
+                ? D3DPRESENT_INTERVAL_ONE
+                : D3DPRESENT_INTERVAL_IMMEDIATE;
 
         IDirect3D8* const d3d = graphD3D(m_direct3D);
-        IDirect3DDevice8* device = nullptr;
 
+        // The runtime creation path has its own retail depth/stencil preference order:
+        // D24S8 -> D24X8 -> D16.  This intentionally differs from the mode-catalog
+        // probing order in this code path.
+        m_depthStencilFormat = 0u;
+        const D3DFORMAT runtimeDepthFormats[] = {
+            D3DFMT_D24S8,
+            D3DFMT_D24X8,
+            D3DFMT_D16
+        };
+        for (D3DFORMAT depthFormat : runtimeDepthFormats)
+        {
+            if (d3d->CheckDepthStencilMatch(
+                    static_cast<UINT>(m_selectedAdapterIndex),
+                    D3DDEVTYPE_HAL,
+                    static_cast<D3DFORMAT>(m_adapterDisplayFormat),
+                    static_cast<D3DFORMAT>(m_selectedDisplayFormat),
+                    depthFormat) == D3D_OK)
+            {
+                m_depthStencilFormat = static_cast<DWORD>(depthFormat);
+                break;
+            }
+        }
+        pp.AutoDepthStencilFormat = static_cast<D3DFORMAT>(m_depthStencilFormat);
+
+        IDirect3DDevice8* device = nullptr;
         DWORD vertexProcessing = (m_graphFlags & 0x00000004u) != 0u
             ? D3DCREATE_SOFTWARE_VERTEXPROCESSING
             : D3DCREATE_HARDWARE_VERTEXPROCESSING;
-        HRESULT hr = d3d->CreateDevice(static_cast<UINT>(m_selectedAdapterIndex),
-                                       D3DDEVTYPE_HAL,
-                                       static_cast<HWND>(hWnd),
-                                       vertexProcessing,
-                                       &pp,
-                                       &device);
+        HRESULT hr = d3d->CreateDevice(
+            static_cast<UINT>(m_selectedAdapterIndex),
+            D3DDEVTYPE_HAL,
+            static_cast<HWND>(m_windowHandle),
+            vertexProcessing,
+            &pp,
+            &device);
+
+        // Retail logs the first hardware/software attempt before applying its software-VP fallback.
+        LOG::Write(
+            "Selected display mode(%s %.0fx%.0f backbuffer=%s desktop=%s zbuffer %s) -> %s",
+            fullscreenRequested() ? "FULLSCREEN" : "WINDOWED",
+            static_cast<double>(m_sizeX),
+            static_cast<double>(m_sizeY),
+            D3DFormatToString(m_selectedDisplayFormat),
+            D3DFormatToString(m_adapterDisplayFormat),
+            D3DFormatToString(m_depthStencilFormat),
+            hr == D3D_OK ? "SUCCESS" : "FAILED");
 
         if (hr != D3D_OK && (m_graphFlags & 0x00000004u) == 0u)
         {
             m_graphFlags |= 0x00000004u;
             vertexProcessing = D3DCREATE_SOFTWARE_VERTEXPROCESSING;
-            hr = d3d->CreateDevice(static_cast<UINT>(m_selectedAdapterIndex),
-                                   D3DDEVTYPE_HAL,
-                                   static_cast<HWND>(hWnd),
-                                   vertexProcessing,
-                                   &pp,
-                                   &device);
+            hr = d3d->CreateDevice(
+                static_cast<UINT>(m_selectedAdapterIndex),
+                D3DDEVTYPE_HAL,
+                static_cast<HWND>(m_windowHandle),
+                vertexProcessing,
+                &pp,
+                &device);
         }
         if (hr != D3D_OK)
         {
@@ -4194,20 +4244,6 @@ namespace as1
         }
 
         m_device = device;
-
-        {
-
-            const char* const depthName = D3DFormatToString(adapterRecord.depthStencilFormats[effectiveModeIndex]);
-            const char* const desktopName = D3DFormatToString(adapterRecord.desktopDisplayFormat);
-            const char* const backBufferName = D3DFormatToString(static_cast<DWORD>(pp.BackBufferFormat));
-            char selected[192] = {};
-            std::snprintf(selected, sizeof(selected),
-                          "Selected display mode %.0fx%.0f %s desktop %s zbuffer %s",
-                          static_cast<double>(m_sizeX),
-                          static_cast<double>(m_sizeY),
-                          backBufferName, desktopName, depthName);
-            LOG::Write("%s", selected);
-        }
 
         D3DCAPS8 caps;
         hr = device->GetDeviceCaps(&caps);
@@ -4228,6 +4264,29 @@ namespace as1
         m_viewportBottom = m_sizeY;
         if (restoreDeviceObjectsRetail() != 0)
             return 1;
+
+        // this code path applies the viewport once here; initializeWindowDevice/this code path
+        // applies it again after returning, which is observable in the retail log.
+        if (fullscreenRequested() && (m_graphFlags & 0x00000080u) == 0u)
+        {
+            (void)setViewportRetail(0.0f, 0.0f, m_sizeX, m_sizeY);
+        }
+        else
+        {
+            RECT windowRect{};
+            RECT clientRect{};
+            GetWindowRect(static_cast<HWND>(m_windowHandle), &windowRect);
+            GetClientRect(static_cast<HWND>(m_windowHandle), &clientRect);
+            POINT clientTopLeft{clientRect.left, clientRect.top};
+            POINT clientBottomRight{clientRect.right, clientRect.bottom};
+            ClientToScreen(static_cast<HWND>(m_windowHandle), &clientTopLeft);
+            ClientToScreen(static_cast<HWND>(m_windowHandle), &clientBottomRight);
+            (void)setViewportRetail(
+                static_cast<float>(clientTopLeft.x - windowRect.left),
+                static_cast<float>(clientTopLeft.y - windowRect.top),
+                static_cast<float>(clientBottomRight.x - windowRect.left),
+                static_cast<float>(clientBottomRight.y - windowRect.top));
+        }
 
         return 0;
 #else
@@ -4262,7 +4321,7 @@ namespace as1
 
     void GRAPH::queueSteamDisplayChange(int sizeX, int sizeY, int fullscreen) noexcept
     {
-        // Native 0x96 stores PopInt() results in reverse address order:
+        // Native action 0x96 stores the popped values in destination order:
         // +E40 fullscreen, +E3C height, +E38 width.
         m_pendingGraphOpA = sizeX;
         m_pendingGraphOpB = sizeY;
@@ -4274,34 +4333,60 @@ namespace as1
         const int width = m_pendingGraphOpA;
         const int height = m_pendingGraphOpB;
         const int fullscreen = m_pendingGraphOpC;
-        const bool fullscreenOnlyChange = (width == -1 || height == -1) && fullscreen != -1;
+        const bool sizeChange = width != -1 && height != -1;
+        const bool fullscreenOnlyChange = !sizeChange && fullscreen != -1;
         m_pendingGraphOpA = -1;
         m_pendingGraphOpB = -1;
         m_pendingGraphOpC = -1;
 
-        if (width == -1 || height == -1)
+        // The game logic dispatches either SetScreenSize or SetFullscreen after
+        // EndScene.  A queued fullscreen value is ignored when both dimensions are
+        // present.
+        if (sizeChange)
         {
-            if (fullscreen == -1)
+            LOG::Write("SetScreenSize(%i, %i) pretact=%i", width, height, 0);
+            if (graphConvertFloatToInt32(m_sizeX) == width && graphConvertFloatToInt32(m_sizeY) == height)
                 return;
-            setFullscreenRequested(fullscreen != 0);
+            setScreenSize(width, height);
         }
         else
         {
-            setScreenSize(width, height);
+            if (!fullscreenOnlyChange)
+                return;
+            LOG::Write("SetFullscreen(%i) pretact=%i", fullscreen, 0);
+            setFullscreenRequested(fullscreen != 0);
         }
 
 #ifdef _WIN32
         if (!m_device || !m_windowHandle)
             return;
 
-        if (width != -1 && height != -1)
+        if (sizeChange)
             (void)setViewportRetail(m_viewportLeft, m_viewportTop, m_sizeX, m_sizeY);
 
         invalidateDeviceObjectsRetail();
 
+        // The game logic rebuilds these two formats on every Reset.  Reusing the
+        // format selected for the previous window mode can leave a stale backbuffer
+        // format when switching fullscreen/windowed.
+        const GraphAdapterRecord& adapterRecord = selectedAdapterRecord();
+        if (fullscreenRequested())
+        {
+            m_adapterDisplayFormat = static_cast<DWORD>(D3DFMT_X8R8G8B8);
+            m_selectedDisplayFormat = static_cast<DWORD>(D3DFMT_A8R8G8B8);
+        }
+        else
+        {
+            m_adapterDisplayFormat = adapterRecord.desktopDisplayFormat;
+            m_selectedDisplayFormat =
+                (adapterRecord.desktopDisplayFormat == static_cast<DWORD>(D3DFMT_X8R8G8B8))
+                    ? static_cast<DWORD>(D3DFMT_A8R8G8B8)
+                    : adapterRecord.desktopDisplayFormat;
+        }
+
         D3DPRESENT_PARAMETERS& pp = m_d3d9PresentParameters;
-        pp.BackBufferWidth = static_cast<UINT>(graphRetailFtolLow32(m_sizeX));
-        pp.BackBufferHeight = static_cast<UINT>(graphRetailFtolLow32(m_sizeY));
+        pp.BackBufferWidth = static_cast<UINT>(graphConvertFloatToInt32(m_sizeX));
+        pp.BackBufferHeight = static_cast<UINT>(graphConvertFloatToInt32(m_sizeY));
         pp.Windowed = fullscreenRequested() ? FALSE : TRUE;
         pp.hDeviceWindow = static_cast<HWND>(m_windowHandle);
         pp.BackBufferFormat = static_cast<D3DFORMAT>(m_selectedDisplayFormat);
@@ -4309,11 +4394,18 @@ namespace as1
 
         IDirect3DDevice8* const device = graphDevice(m_device);
         const HRESULT reset = device->Reset(&pp);
+        LOG::Write(
+            "  InvalidateDeviceObjects(%s %.0fx%.0f backbuffer=%s desktop=%s zbuffer=%s) -> %s",
+            fullscreenRequested() ? "FULLSCREEN" : "WINDOWED",
+            static_cast<double>(m_sizeX),
+            static_cast<double>(m_sizeY),
+            D3DFormatToString(m_selectedDisplayFormat),
+            D3DFormatToString(m_adapterDisplayFormat),
+            D3DFormatToString(m_depthStencilFormat),
+            SUCCEEDED(reset) ? "SUCCESS" : "FAILED");
         if (FAILED(reset))
-        {
-            LOG::ResourceError("%s", 4, "Reset", static_cast<int>(reset), "GRAPH");
             return;
-        }
+
         if (restoreDeviceObjectsRetail() != 0)
             return;
 
@@ -4462,14 +4554,14 @@ namespace as1
                         const float tileWidth = (tileX + 256.0f < right) ? 256.0f : (right - tileX);
                         const float tileHeight = (tileY + 256.0f < bottom) ? 256.0f : (bottom - tileY);
                         const RECTI destination{
-                            graphRetailFtolLow32(tileX - left),
-                            graphRetailFtolLow32(tileY - top),
-                            graphRetailFtolLow32(tileX + tileWidth - left),
-                            graphRetailFtolLow32(tileY + tileHeight - top)};
+                            graphConvertFloatToInt32(tileX - left),
+                            graphConvertFloatToInt32(tileY - top),
+                            graphConvertFloatToInt32(tileX + tileWidth - left),
+                            graphConvertFloatToInt32(tileY + tileHeight - top)};
                         const RECTI copyOrigin{0, 0, 0, 0};
                         const RECTI source{0, 0,
-                            graphRetailFtolLow32(tileWidth),
-                            graphRetailFtolLow32(tileHeight)};
+                            graphConvertFloatToInt32(tileWidth),
+                            graphConvertFloatToInt32(tileHeight)};
                         if (drawEffects != 0)
                         {
                             int copyResult = -1;
@@ -4691,7 +4783,9 @@ namespace as1
         {
 
             VID* const vid = (slot < rawVidCount) ? appVidTable.slot(slot) : nullptr;
-            if (!vid)
+            // The game logic skips the global null/default VID sentinel while
+            // propagating graph gamma to the application VID table.
+            if (!vid || vid == MAP::NullVid())
                 continue;
 
             vid->SetGammaRaw(rawGamma, 4);
@@ -4712,8 +4806,8 @@ namespace as1
         if ((color & 0x00FFFFFFu) == 0u)
             return;
 
-        const int sizeX = graphRetailFtolLow32(sizeXValue);
-        const int sizeY = graphRetailFtolLow32(sizeYValue);
+        const int sizeX = graphConvertFloatToInt32(sizeXValue);
+        const int sizeY = graphConvertFloatToInt32(sizeYValue);
         int halfExtentX = static_cast<std::int32_t>(static_cast<std::uint32_t>(sizeX / 2) * 3u) & ~3;
         int halfExtentY = static_cast<std::int32_t>(static_cast<std::uint32_t>(sizeY / 2) * 3u) & ~3;
         if (halfExtentX > 512)
@@ -4723,7 +4817,7 @@ namespace as1
 
         const int depthScaleDivisor = static_cast<std::int32_t>(
             static_cast<std::uint32_t>(sizeX) * static_cast<std::uint32_t>(sizeY)) / 500;
-        const int sourceZ = graphRetailFtolLow32(z);
+        const int sourceZ = graphConvertFloatToInt32(z);
         const int doubledSourceZ = static_cast<std::int32_t>(static_cast<std::uint32_t>(sourceZ) * 2u);
         const int lightCenterZ = static_cast<std::int32_t>(static_cast<std::uint32_t>(doubledSourceZ / 3) + 8u);
         const float centerX = x;
@@ -4743,10 +4837,10 @@ namespace as1
             return;
 
         RECTI destination{
-            graphRetailFtolLow32(left),
-            graphRetailFtolLow32(top),
-            graphRetailFtolLow32(right),
-            graphRetailFtolLow32(bottom)
+            graphConvertFloatToInt32(left),
+            graphConvertFloatToInt32(top),
+            graphConvertFloatToInt32(right),
+            graphConvertFloatToInt32(bottom)
         };
         RECTI source{0, 0, halfExtentX / 2, halfExtentY / 2};
 
@@ -4785,8 +4879,8 @@ namespace as1
                     !graphRetailFcompC0(sampleY, m_viewportTop) &&
                     graphRetailFcompC0(sampleY, m_viewportBottom))
                 {
-                    const int x = static_cast<std::int32_t>(static_cast<std::uint32_t>(xOffset) + static_cast<std::uint32_t>(graphRetailFtolLow32(centerX)));
-                    const int y = static_cast<std::int32_t>(static_cast<std::uint32_t>(yOffset) + static_cast<std::uint32_t>(graphRetailFtolLow32(centerY)));
+                    const int x = static_cast<std::int32_t>(static_cast<std::uint32_t>(xOffset) + static_cast<std::uint32_t>(graphConvertFloatToInt32(centerX)));
+                    const int y = static_cast<std::int32_t>(static_cast<std::uint32_t>(yOffset) + static_cast<std::uint32_t>(graphConvertFloatToInt32(centerY)));
                     sampledDepth = static_cast<int>(worldDepth[y * worldDepthPitch + x] >> 3u) - 128;
                 }
 
@@ -4796,8 +4890,8 @@ namespace as1
                     !graphRetailFcompC0(sampleY3, m_viewportTop) &&
                     graphRetailFcompC0(sampleY3, m_viewportBottom))
                 {
-                    const int x = static_cast<std::int32_t>(static_cast<std::uint32_t>(xOffset) + static_cast<std::uint32_t>(graphRetailFtolLow32(centerX)) + 3u);
-                    const int y = static_cast<std::int32_t>(static_cast<std::uint32_t>(yOffset) + static_cast<std::uint32_t>(graphRetailFtolLow32(centerY)) + 3u);
+                    const int x = static_cast<std::int32_t>(static_cast<std::uint32_t>(xOffset) + static_cast<std::uint32_t>(graphConvertFloatToInt32(centerX)) + 3u);
+                    const int y = static_cast<std::int32_t>(static_cast<std::uint32_t>(yOffset) + static_cast<std::uint32_t>(graphConvertFloatToInt32(centerY)) + 3u);
                     sampledDepth3 = static_cast<int>(worldDepth[y * worldDepthPitch + x] >> 3u) - 128;
                 }
 
@@ -4867,25 +4961,28 @@ namespace as1
 
     void GRAPH::LoadParameters(RESOURCE* map)
     {
-
-        if (map->GoBegin(RESOURCE::ResTypes::GRAPH) == 0)
-        {
-            GammaRawPair raw{};
-            map->read(&m_renderFlags, 4);
-            map->read(&raw, 8);
-            setGamma(raw);
-            map->read(&m_windDirection, 4);
-            map->read(&m_windSpeed, 4);
-
-            return;
-        }
-
-        if (map->GoBegin(RESOURCE::ResTypes::HEAD) != 0 || map->SubSize() < 31)
+        if (!map)
             return;
 
-        BYTE legacyHead[20]{};
-        map->read(legacyHead, 20);
+        // The game logic.  The caller has already positioned RESOURCE at the
+        // GRPH payload; this routine performs no section lookup of its own.
+        GammaRawPair raw{};
+        std::uint32_t direction = 0u;
+        map->read(&m_renderFlags, 4);
+        map->read(&raw, 8);
+        setGamma(raw);
+        map->read(&direction, 4);
+        m_windDirection = (m_windDirection & 0xFFFFFF00u) | (direction & 0xFFu);
+        map->read(&m_windSpeed, 4);
+    }
 
+    void GRAPH::LoadLegacyParameters(RESOURCE* map)
+    {
+        if (!map)
+            return;
+
+        // The game logic.  MAP has already consumed the 20-byte legacy HEAD
+        // core, so read the compact graph tail directly from the current cursor.
         std::uint32_t packedGamma = 0u;
         std::uint8_t direction = 0u;
         std::int16_t magnitude = 0;
@@ -4895,8 +4992,7 @@ namespace as1
         setGamma(raw);
         map->read(&direction, 1);
         map->read(&magnitude, 2);
-        m_windDirection = direction;
+        m_windDirection = (m_windDirection & 0xFFFFFF00u) | direction;
         m_windSpeed = static_cast<float>(magnitude) * 0.001f;
-
     }
 }

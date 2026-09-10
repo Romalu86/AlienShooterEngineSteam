@@ -16,35 +16,34 @@ namespace as1
 {
     namespace
     {
-        bool cannonX87LessOrUnordered(double lhs, double rhs) noexcept
+        bool cannonLessOrUnordered(double lhs, double rhs) noexcept
         {
             return std::isnan(lhs) || std::isnan(rhs) || lhs < rhs;
         }
 
-        bool cannonX87LessEqualOrUnordered(double lhs, double rhs) noexcept
+        bool cannonLessEqualOrUnordered(double lhs, double rhs) noexcept
         {
             return std::isnan(lhs) || std::isnan(rhs) || lhs <= rhs;
         }
 
-        bool cannonX87EqualOrUnordered(double lhs, double rhs) noexcept
+        bool cannonEqualOrUnordered(double lhs, double rhs) noexcept
         {
             return std::isnan(lhs) || std::isnan(rhs) || lhs == rhs;
         }
 
-        bool cannonX87OrderedGreaterEqual(double lhs, double rhs) noexcept
+        bool cannonOrderedGreaterEqual(double lhs, double rhs) noexcept
         {
-            // FCOMP/FNSTSW + TEST AH,1 followed by JNZ rejects C0.
-            // Unordered has C0 set and therefore must be rejected as well.
+            // Accept only an ordered greater-than-or-equal comparison; NaN is rejected.
             return !std::isnan(lhs) && !std::isnan(rhs) && lhs >= rhs;
         }
 
-        bool cannonX87OrderedNotEqual(double lhs, double rhs) noexcept
+        bool cannonOrderedNotEqual(double lhs, double rhs) noexcept
         {
-            // TEST AH,40h treats equality and unordered identically.
-            return !cannonX87EqualOrUnordered(lhs, rhs);
+            // comparison status test treats equality and unordered identically.
+            return !cannonEqualOrUnordered(lhs, rhs);
         }
 
-        bool cannonUcomissNotEqualOrUnordered(double lhs, double rhs) noexcept
+        bool cannonNotEqualOrUnordered(double lhs, double rhs) noexcept
         {
             return std::isnan(lhs) || std::isnan(rhs) || lhs != rhs;
         }
@@ -56,16 +55,16 @@ namespace as1
 
         bool cannonRetailContinuousZCross(double targetZ, double previousZ, double currentZ) noexcept
         {
-            if (cannonX87LessOrUnordered(previousZ, currentZ))
+            if (cannonLessOrUnordered(previousZ, currentZ))
             {
-                if (cannonX87LessOrUnordered(targetZ, previousZ))
+                if (cannonLessOrUnordered(targetZ, previousZ))
                     return false;
-                return cannonX87LessEqualOrUnordered(targetZ, currentZ);
+                return cannonLessEqualOrUnordered(targetZ, currentZ);
             }
 
-            if (cannonX87LessOrUnordered(targetZ, currentZ))
+            if (cannonLessOrUnordered(targetZ, currentZ))
                 return false;
-            return cannonX87LessEqualOrUnordered(targetZ, previousZ);
+            return cannonLessEqualOrUnordered(targetZ, previousZ);
         }
     }
 
@@ -75,7 +74,7 @@ namespace as1
         m_cannonMotionFlags |= 1;
 
         if ((vid->properties() & P_RANDZSPEED) != 0u &&
-            cannonUcomissNotEqualOrUnordered(vid->maximumZSpeed(), 0.0f))
+            cannonNotEqualOrUnordered(vid->maximumZSpeed(), 0.0f))
         {
             const bool negative = (std::rand() & 1) == 0;
             const float divisor = negative ? -32767.0f : 32767.0f;
@@ -93,7 +92,7 @@ namespace as1
         }
 
         if ((vid->properties() & P_RANDSPEED) != 0u &&
-            cannonUcomissNotEqualOrUnordered(vid->maxSpeedValue(), 0.0f))
+            cannonNotEqualOrUnordered(vid->maxSpeedValue(), 0.0f))
         {
             const float randomizedMaxSpeed =
                 static_cast<float>(std::rand()) * vid->maxSpeedValue() / 32767.0f;
@@ -118,16 +117,16 @@ namespace as1
 
         if (animation < 15)
         {
-            // COMISS(-100.0, Z): unordered follows the no-change path.
+            // floating-point comparison(-100.0, Z): unordered follows the no-change path.
             if (cannonOrderedLess(Z(), -100.0f))
             {
                 ChangeAnimation(16);
                 return 0;
             }
 
-            // UCOMISS(Speed, 0) + LAHF/TEST AH,44h changes animation for
+            // floating-point comparison(Speed, 0) + comparison status handling AH,44h changes animation for
             // every state except ordered equality, including unordered.
-            if (cannonUcomissNotEqualOrUnordered(Speed(), 0.0f))
+            if (cannonNotEqualOrUnordered(Speed(), 0.0f))
             {
                 ChangeAnimation(2);
                 return 0;
@@ -164,8 +163,8 @@ namespace as1
 
         if ((vid->spriteTypeId() & 0x00000200u) != 0u &&
             (vid->properties() & P_GRAVITY) != 0u &&
-            cannonX87LessEqualOrUnordered(candidate.z, candidateGround) &&
-            cannonX87OrderedGreaterEqual(Z(), currentGround))
+            cannonLessEqualOrUnordered(candidate.z, candidateGround) &&
+            cannonOrderedGreaterEqual(Z(), currentGround))
         {
             dispatchVirtualAction(ActionCode::ACT_PATH_GROUND,
                                      static_cast<int>(Z()),
@@ -174,23 +173,23 @@ namespace as1
             candidate.x = X();
             candidate.y = Y();
         }
-        else if (cannonX87OrderedNotEqual(Z(), candidate.z) &&
+        else if (cannonOrderedNotEqual(Z(), candidate.z) &&
                  (vid->properties() & P_GRAVITY) == 0u &&
-                 cannonX87OrderedNotEqual(movePlane, 0.0f))
+                 cannonOrderedNotEqual(movePlane, 0.0f))
         {
             bool clampToMovePlane = false;
-            if (cannonX87LessOrUnordered(Z(), movePlane))
+            if (cannonLessOrUnordered(Z(), movePlane))
             {
-                clampToMovePlane = !cannonX87LessOrUnordered(candidate.z, movePlane);
+                clampToMovePlane = !cannonLessOrUnordered(candidate.z, movePlane);
             }
-            else if (cannonX87LessEqualOrUnordered(Z(), movePlane))
+            else if (cannonLessEqualOrUnordered(Z(), movePlane))
             {
                 // The first branch rejected < and unordered, so this is the
                 clampToMovePlane = (vid->properties() & P_SELFMOVING) == 0u;
             }
             else
             {
-                clampToMovePlane = cannonX87LessOrUnordered(candidate.z, movePlane);
+                clampToMovePlane = cannonLessOrUnordered(candidate.z, movePlane);
             }
 
             if (clampToMovePlane)
@@ -200,8 +199,8 @@ namespace as1
             }
         }
 
-        if (cannonX87OrderedNotEqual(X(), candidate.x) ||
-            cannonX87OrderedNotEqual(Y(), candidate.y))
+        if (cannonOrderedNotEqual(X(), candidate.x) ||
+            cannonOrderedNotEqual(Y(), candidate.y))
         {
             if (CanPlaceWithCrush(candidate.x, candidate.y, candidate.z) != nullptr)
             {
@@ -213,21 +212,21 @@ namespace as1
                 ChangeCoor(candidate.x, candidate.y, candidate.z);
                 if (currentAnimation() < 15 &&
                     (vid->properties() & P_GRAVITY) == 0u &&
-                    (cannonX87LessOrUnordered(X(), -220.0f) ||
-                     cannonX87LessOrUnordered(Y(), -200.0f) ||
-                     cannonX87LessOrUnordered(owner->SizeX() + 220.0f, X()) ||
-                     cannonX87LessOrUnordered(owner->SizeY() + 200.0f, Y())))
+                    (cannonLessOrUnordered(X(), -220.0f) ||
+                     cannonLessOrUnordered(Y(), -200.0f) ||
+                     cannonLessOrUnordered(owner->SizeX() + 220.0f, X()) ||
+                     cannonLessOrUnordered(owner->SizeY() + 200.0f, Y())))
                     ChangeAnimation(15);
             }
         }
-        if (cannonX87OrderedNotEqual(Z(), candidate.z))
+        if (cannonOrderedNotEqual(Z(), candidate.z))
             ChangeCoor(X(), Y(), candidate.z);
 
         SPRITE* const target = goalSprite();
         if (!target)
         {
-            if (cannonX87LessOrUnordered(vid->moveUpZ(), 0.0f) &&
-                cannonX87LessOrUnordered(ZSpeed(), 0.0f))
+            if (cannonLessOrUnordered(vid->moveUpZ(), 0.0f) &&
+                cannonLessOrUnordered(ZSpeed(), 0.0f))
             {
                 const std::uint32_t deltaMs = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
                 RotateTact(directionIndex() + 32, deltaMs);
@@ -237,7 +236,7 @@ namespace as1
 
         const float dx = std::fabs(target->X() - X());
         const float dy = std::fabs(target->Y() - Y());
-        const float distance = cannonX87LessEqualOrUnordered(dx, dy)
+        const float distance = cannonLessEqualOrUnordered(dx, dy)
             ? static_cast<float>(dy + dx * 0.5f)
             : static_cast<float>(dx + dy * 0.5f);
 
@@ -246,9 +245,9 @@ namespace as1
             if ((m_cannonMotionFlags & 1) != 0)
             {
                 const float ground = owner->GetGroundZ(VECTOR2{X(), Y()});
-                if ((cannonX87LessEqualOrUnordered(ground + vid->moveUpZ(), Z()) &&
-                     cannonX87LessEqualOrUnordered(target->Z(), Z())) ||
-                    cannonX87LessEqualOrUnordered(ZSpeed(), 0.0f))
+                if ((cannonLessEqualOrUnordered(ground + vid->moveUpZ(), Z()) &&
+                     cannonLessEqualOrUnordered(target->Z(), Z())) ||
+                    cannonLessEqualOrUnordered(ZSpeed(), 0.0f))
                     m_cannonMotionFlags &= ~1;
                 else
                 {
@@ -261,9 +260,9 @@ namespace as1
             }
             else
             {
-                const int reverse = cannonX87LessOrUnordered(Speed(), 0.0f) ? 0x80 : 0;
-                const int desired = (AngleFromXY(static_cast<int>(target->X() - X()),
-                                                 static_cast<int>(target->Y() - Y()), nullptr).Int() + reverse) & 0xFF;
+                const int reverse = cannonLessOrUnordered(Speed(), 0.0f) ? 0x80 : 0;
+                const int desired = (RetailDirectionFromFloatXY(
+                    target->X() - X(), target->Y() - Y()).Int() + reverse) & 0xFF;
                 const std::uint32_t deltaMs = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
                 const int turn = RotateTact(ANGLE(static_cast<unsigned char>(desired)), deltaMs).Int();
                 if (distance > 10.0f && distance < 30.0f && turn > 70)
@@ -271,14 +270,14 @@ namespace as1
                     m_cannonMotionFlags |= 1;
                     StartMove();
                 }
-                else if (target->Z() >= Z() || cannonX87EqualOrUnordered(distance, 0.0f))
+                else if (target->Z() >= Z() || cannonEqualOrUnordered(distance, 0.0f))
                 {
                     setZSpeedDirect(0.0f);
                 }
                 else
                 {
-                    float zSpeed = (target->Z() - Z()) / distance * 0.1f;
-                    if (cannonX87LessOrUnordered(zSpeed, -vid->maximumZSpeed()))
+                    float zSpeed = ((target->Z() - Z()) / distance) / 10.0f;
+                    if (cannonLessOrUnordered(zSpeed, -vid->maximumZSpeed()))
                         zSpeed = -vid->maximumZSpeed();
                     setZSpeedDirect(zSpeed);
                 }
@@ -287,9 +286,9 @@ namespace as1
         else if (distance > 100.0f)
         {
             const int previousDir = directionIndex() & 0xFF;
-            const int reverse = cannonX87LessOrUnordered(Speed(), 0.0f) ? 0x80 : 0;
-            const int desired = (AngleFromXY(static_cast<int>(target->X() - X()),
-                                             static_cast<int>(target->Y() - Y()), nullptr).Int() + reverse) & 0xFF;
+            const int reverse = cannonLessOrUnordered(Speed(), 0.0f) ? 0x80 : 0;
+            const int desired = (RetailDirectionFromFloatXY(
+                target->X() - X(), target->Y() - Y()).Int() + reverse) & 0xFF;
             const std::uint32_t deltaMs = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
             RotateTact(desired, deltaMs);
             const int currentDir = directionIndex() & 0xFF;
@@ -325,9 +324,9 @@ namespace as1
         }
 
         if (!overlapping && (vid->properties() & P_SELFMOVING) != 0u)
-            overlapping = cannonX87LessOrUnordered(std::fabs(target->Z() - Z()), 20.0f) &&
-                          cannonX87LessOrUnordered(std::fabs(target->X() - X()), 10.0f) &&
-                          cannonX87LessOrUnordered(std::fabs(target->Y() - Y()), 10.0f);
+            overlapping = cannonLessOrUnordered(std::fabs(target->Z() - Z()), 20.0f) &&
+                          cannonLessOrUnordered(std::fabs(target->X() - X()), 10.0f) &&
+                          cannonLessOrUnordered(std::fabs(target->Y() - Y()), 10.0f);
         if (overlapping)
         {
             Stop();

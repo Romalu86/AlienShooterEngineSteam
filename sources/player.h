@@ -12,8 +12,7 @@ namespace as1
     class STRING;
     namespace input { struct InputMessageState; }
 
-    // Canonical raw subobject owners used by the PLAYER path vtables.  Their
-    // ECX/this is PLAYER+0x28 or PLAYER+0x31C respectively, not PLAYER itself.
+    // Path-owner helpers used by PLAYER-owned path state.
     void* scalarDeletingDestructorPathOwner(void* pathOwner, unsigned char deleteSelfFlag) noexcept;
     int releasePathSprites(void* pathOwner) noexcept;
     void clearPathSpriteReferences(void* pathOwner, SPRITE* sprite) noexcept;
@@ -63,6 +62,7 @@ namespace as1
         int removeEmbeddedSpriteReference(SPRITE* sprite) noexcept;
         void processInput(as1::input::InputMessageState* inputState) noexcept;
         void dispatchInputViaRetailVtable(as1::input::InputMessageState* inputState) noexcept;
+        void dispatchReservedScriptToggleViaRetailVtable(int value) noexcept;
         void processInputGlobalListPrepass() noexcept;
         void processInputAttackWeaponPreselect(SPRITE* controlled) noexcept;
         void processInputDigitWeaponSelect(SPRITE* controlled, std::uint32_t lastCode) noexcept;
@@ -91,7 +91,7 @@ namespace as1
         struct BaseOwnerLayout
         {
             DWORD vtable;
-            DWORD money;               // +0x04, starting money reset to 1000 by initializeBasePlayerState/410410
+            DWORD money;               // starting money reset to 1000 by initializeBasePlayerState
             int controlMode;           // +0x08
             int playerSlot;           // +0x0C
             DWORD controlledSprite;    // +0x10 SPRITE*

@@ -338,9 +338,11 @@ namespace as1
         float cameraX() const;
         float cameraY() const;
 
-        // MAP::startLoadMap calls GRAPH::LoadParameters before reading HEAD.
-        // AS1 GRPH payload layout is kept readable here: environment, gamma pair, wind, optional sunlight.
+        // The game has two distinct graph-parameter readers.  The normal GRPH reader
+        // (this code path) consumes the current GRPH payload; the legacy reader
+        // (this code path) consumes the compact tail at the current position in HEAD.
         void LoadParameters(RESOURCE* map);
+        void LoadLegacyParameters(RESOURCE* map);
 
         int SizeX() const { return static_cast<int>(m_sizeX); }
         int SizeY() const { return static_cast<int>(m_sizeY); }
@@ -400,6 +402,7 @@ namespace as1
         static const char* D3DFormatToString(DWORD format);
 
     private:
+        friend class MAP;
         friend class VID;
         friend class VID_HARDWARE_Z;
 

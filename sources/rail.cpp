@@ -1,10 +1,9 @@
 #include "rail.h"
 #include "map.h"
 
-#include <cmath>
 #include <cstring>
 #include <cstdint>
-#include <limits>
+#include <xmmintrin.h>
 
 namespace as1
 {
@@ -50,73 +49,52 @@ namespace as1
 
         int truncateRailFloatToInt(float value) noexcept
         {
-            const long double d = static_cast<long double>(value);
-            if (!std::isfinite(d) ||
-                d < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                d > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-            {
-                return 0;
-            }
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
         }
 
-        float computeRailScaledCoordinate(float base, float sizeValue, float componentValue, float scaleValue) noexcept
+        float computeRailOwnerCoordinate(float base, float sizeValue, float componentValue) noexcept
         {
-            const long double v =
-                static_cast<long double>(sizeValue) * static_cast<long double>(componentValue) *
-                static_cast<long double>(scaleValue) + static_cast<long double>(base);
-            return static_cast<float>(v);
+            __m128 value = _mm_mul_ss(_mm_set_ss(sizeValue), _mm_set_ss(componentValue));
+            value = _mm_mul_ss(value, _mm_set_ss(0.25f));
+            value = _mm_add_ss(value, _mm_set_ss(base));
+            return _mm_cvtss_f32(value);
+        }
+
+        float computeRailLinkCoordinate(float base, float sizeValue, float componentValue) noexcept
+        {
+            __m128 value = _mm_mul_ss(_mm_set_ss(sizeValue), _mm_set_ss(componentValue));
+            value = _mm_mul_ss(value, _mm_set_ss(3.0f));
+            value = _mm_mul_ss(value, _mm_set_ss(0.25f));
+            value = _mm_add_ss(value, _mm_set_ss(base));
+            return _mm_cvtss_f32(value);
         }
 
         float computeRailPointZ(float baseZ, float heightTableValue, float moveUpZ) noexcept
         {
-            const long double v =
-                static_cast<long double>(baseZ) +
-                static_cast<long double>(heightTableValue) +
-                static_cast<long double>(moveUpZ);
-            return static_cast<float>(v);
+            __m128 value = _mm_add_ss(_mm_set_ss(baseZ), _mm_set_ss(heightTableValue));
+            value = _mm_add_ss(value, _mm_set_ss(moveUpZ));
+            return _mm_cvtss_f32(value);
         }
 
         float computeRailPointZMoveThenHeight(float baseZ, float moveUpZ, float heightTableValue) noexcept
         {
-            const long double v =
-                static_cast<long double>(baseZ) +
-                static_cast<long double>(moveUpZ) +
-                static_cast<long double>(heightTableValue);
-            return static_cast<float>(v);
+            __m128 value = _mm_add_ss(_mm_set_ss(baseZ), _mm_set_ss(moveUpZ));
+            value = _mm_add_ss(value, _mm_set_ss(heightTableValue));
+            return _mm_cvtss_f32(value);
         }
 
         int computeRailLinkZToInt(float baseZ, float heightTableValue, float moveUpZ) noexcept
         {
-            const long double d =
-                static_cast<long double>(baseZ) +
-                static_cast<long double>(heightTableValue) +
-                static_cast<long double>(moveUpZ);
-            if (!std::isfinite(d) ||
-                d < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                d > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-            {
-                return 0;
-            }
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+            __m128 value = _mm_add_ss(_mm_set_ss(baseZ), _mm_set_ss(heightTableValue));
+            value = _mm_add_ss(value, _mm_set_ss(moveUpZ));
+            return _mm_cvtt_ss2si(value);
         }
 
         int computeRailLinkZMoveThenHeightToInt(float baseZ, float moveUpZ, float heightTableValue) noexcept
         {
-            const long double d =
-                static_cast<long double>(baseZ) +
-                static_cast<long double>(moveUpZ) +
-                static_cast<long double>(heightTableValue);
-            if (!std::isfinite(d) ||
-                d < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                d > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-            {
-                return 0;
-            }
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+            __m128 value = _mm_add_ss(_mm_set_ss(baseZ), _mm_set_ss(moveUpZ));
+            value = _mm_add_ss(value, _mm_set_ss(heightTableValue));
+            return _mm_cvtt_ss2si(value);
         }
 
         int floatBitsAsInt(float value) noexcept
@@ -126,8 +104,6 @@ namespace as1
             return raw;
         }
 
-        constexpr float kRailOwnerPointScale = 0.25f;
-        constexpr float kRailLinkPointScale = 0.75f;
         constexpr unsigned kRailDirectionTableModulo = 12u;
         constexpr unsigned kRailDirectionByteMask = 0xFFu;
 
@@ -154,12 +130,12 @@ namespace as1
 
         float railOwnerPointCoordinate(float base, float size, float component) noexcept
         {
-            return computeRailScaledCoordinate(base, size, component, kRailOwnerPointScale);
+            return computeRailOwnerCoordinate(base, size, component);
         }
 
         float railLinkPointCoordinate(float base, float size, float component) noexcept
         {
-            return computeRailScaledCoordinate(base, size, component, kRailLinkPointScale);
+            return computeRailLinkCoordinate(base, size, component);
         }
 
         float railPointZ(float baseZ, float heightTableValue, float moveUpZ) noexcept
@@ -352,8 +328,9 @@ namespace as1
         (void)Action(static_cast<int>(railDamageChangeVidOpcode()),
                      static_cast<std::intptr_t>(changeVid), 0, 0);
 
+        VID* const currentVid = Vid();
         const int bucket = armyBucketFromRuntimeFlags(runtimeFlags());
-        const int frameTime = frameTimeForArmyBucket(vid, bucket);
+        const int frameTime = frameTimeForArmyBucket(currentVid, bucket);
         updateAnimationFrameTime(frameTime);
         return 0;
     }

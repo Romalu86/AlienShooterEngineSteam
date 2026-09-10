@@ -1129,7 +1129,7 @@ namespace as1
         ANGLE m_direction;                       // +0x50
         std::uint32_t m_actionTimer = 0;         // +0x54
         int m_animationFrameTime = 0;            // +0x58
-        SpriteCommandStack m_commandStack;       // +0x5C..+0x6B on x86
+        SpriteCommandStack m_commandStack;       // +0x5C..+0x6B on 32-bit
         ActionAuxState* m_actionAuxState = nullptr; // +0x6C
         SPRITE* m_bestTargetSprite = nullptr;    // +0x70
 
@@ -1250,10 +1250,10 @@ namespace as1
         void DrawDebugOverlay() override;
 
         void drawRegionDebugBounds();
-        double regionScreenLeft() const noexcept;
-        double regionScreenTop() const noexcept;
-        double regionScreenRight() const noexcept;
-        double regionScreenBottom() const noexcept;
+        float regionScreenLeft() const noexcept;
+        float regionScreenTop() const noexcept;
+        float regionScreenRight() const noexcept;
+        float regionScreenBottom() const noexcept;
         void drawRegionTilesAndFog();
         int rebuildRegionFogRamp(int start, int end, int color);
 
