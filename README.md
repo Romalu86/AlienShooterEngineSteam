@@ -14,8 +14,6 @@ The repository is intended for preservation, maintenance, study and non-commerci
   - **Retail | Win32** — release build without Steamworks.
   - **Retail Debug | Win32** — debug build without Steamworks.
 
-- Compiler/runtime layout can differ from the historical executable when a later v141 compiler is used. Functional compatibility is the goal; byte-for-byte executable identity is not required.
-
 ## Added branch features
 
 ### NVID limit: 8192
