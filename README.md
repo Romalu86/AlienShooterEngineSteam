@@ -4,16 +4,6 @@ A Win32/x86 source project focused on compatibility with Alien Shooter Steam 1.2
 
 The repository is intended for preservation, maintenance, study and non-commercial modification. It does **not** include original game data or Steam redistributable binaries.
 
-## Current status
-
-- Compatibility baseline: **Alien Shooter Steam 1.22**.
-- Toolset: **MSVC v141**, Win32/x86.
-- Visual Studio configurations:
-  - **Steam | Win32** — release build with Steamworks support.
-  - **Steam Debug | Win32** — debug build with Steamworks support.
-  - **Retail | Win32** — release build without Steamworks.
-  - **Retail Debug | Win32** — debug build without Steamworks.
-
 ## Added branch features
 
 ### NVID limit: 8192
