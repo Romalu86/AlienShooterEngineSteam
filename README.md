@@ -13,6 +13,13 @@ The Release configurations keep the short names **Steam** and **Retail** in Visu
 
 No source files need to be swapped when changing between Steam and Retail.
 
+# Features of this branch
+1. Fixed a bug with pathfinding in UNIT; it is now independent of FPS.
+2. Added the ability to build the game without Steamworks, with support for offline statistics.
+3. Increased the NVid limit to 8192. The previous limit was 2048.
+
+This branch will be updated as needed in the future.
+
 ## Requirements
 
 - Windows
