@@ -13,8 +13,7 @@ The repository is intended for preservation, maintenance, study and non-commerci
   - **Steam Debug | Win32** — debug build with Steamworks support.
   - **Retail | Win32** — release build without Steamworks.
   - **Retail Debug | Win32** — debug build without Steamworks.
-- The pre-feature Steam compatibility baseline was runtime-tested after pass 19 with no new regressions observed.
-- The current source additionally includes the NVID expansion, high-FPS UNIT/pathfinding correction and Retail/offline Store backend described below.
+
 - Compiler/runtime layout can differ from the historical executable when a later v141 compiler is used. Functional compatibility is the goal; byte-for-byte executable identity is not required.
 
 ## Added branch features
