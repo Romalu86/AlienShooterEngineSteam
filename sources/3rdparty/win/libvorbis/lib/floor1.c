@@ -95,6 +95,11 @@ namespace as1 { namespace thirdparty { namespace xiph2003
 
         int floor1RenderPoint(int x0, int x1, int y0, int y1, int x)
         {
+            // The high bit marks an inactive Floor1 post.  The Steam decoder
+            // masks it before interpolation (original routine at 0x00414110).
+            y0 &= 0x7FFF;
+            y1 &= 0x7FFF;
+
             const int dy = y1 - y0;
             const int adx = x1 - x0;
             if (adx == 0)
