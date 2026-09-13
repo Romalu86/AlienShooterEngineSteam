@@ -166,10 +166,57 @@ namespace as1
             cannonLessEqualOrUnordered(candidate.z, candidateGround) &&
             cannonOrderedGreaterEqual(Z(), currentGround))
         {
-            dispatchVirtualAction(ActionCode::ACT_PATH_GROUND,
-                                     static_cast<int>(Z()),
-                                     static_cast<int>(candidateGround),
-                                     static_cast<int>(currentGround));
+            // Steam 1.22 CANNON::MoveTact (0x4182C0): projectiles, shell
+            // casings and physical ChildVid debris use the CANNON class.  A
+            // ground hit is not ACT_PATH_GROUND.  Retail stops/clamps or
+            // bounces the object here and changes animation to the collision
+            // slots (11/12); once the bounce is exhausted it switches to the
+            // death/rest slot (15), which in turn creates the ChildVid that is
+            // left on the ground.  Skipping this route makes P_BOUNCE objects
+            // fall through the terrain and also skips their collision SFX.
+            candidate.z = Z();
+
+            if (currentAnimation() >= 15)
+            {
+                Stop();
+                if (candidateGround > currentGround)
+                    ChangeAnimation(11);
+            }
+            else if ((vid->properties() & P_BOUNCE) == 0u)
+            {
+                Stop();
+                candidate.z = currentGround;
+                ChangeAnimation(candidateGround <= currentGround ? 12 : 11);
+            }
+            else
+            {
+                if (candidateGround <= currentGround)
+                {
+                    const float zSpeed = ZSpeed();
+                    if (zSpeed < -0.022f)
+                    {
+                        ChangeAnimation(12);
+                        setZSpeedDirect(zSpeed * -0.5f);
+                    }
+                    else if (zSpeed <= 0.005f)
+                    {
+                        setZSpeedDirect(0.0f);
+                        ChangeAnimation(15);
+                    }
+                    else
+                    {
+                        setZSpeedDirect(zSpeed * 0.5f);
+                        ChangeSpeed(Speed() * 0.5f);
+                    }
+                }
+                else
+                {
+                    ChangeAnimation(11);
+                }
+
+                ChangeDirection(ANGLE(static_cast<unsigned char>(directionIndex() - 0x80)));
+            }
+
             candidate.x = X();
             candidate.y = Y();
         }
