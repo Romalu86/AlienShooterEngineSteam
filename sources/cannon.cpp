@@ -26,21 +26,10 @@ namespace as1
             return std::isnan(lhs) || std::isnan(rhs) || lhs <= rhs;
         }
 
-        bool cannonEqualOrUnordered(double lhs, double rhs) noexcept
-        {
-            return std::isnan(lhs) || std::isnan(rhs) || lhs == rhs;
-        }
-
         bool cannonOrderedGreaterEqual(double lhs, double rhs) noexcept
         {
             // Accept only an ordered greater-than-or-equal comparison; NaN is rejected.
             return !std::isnan(lhs) && !std::isnan(rhs) && lhs >= rhs;
-        }
-
-        bool cannonOrderedNotEqual(double lhs, double rhs) noexcept
-        {
-            // comparison status test treats equality and unordered identically.
-            return !cannonEqualOrUnordered(lhs, rhs);
         }
 
         bool cannonNotEqualOrUnordered(double lhs, double rhs) noexcept
@@ -53,18 +42,28 @@ namespace as1
             return !std::isnan(lhs) && !std::isnan(rhs) && lhs < rhs;
         }
 
+        bool cannonOrderedLessEqual(double lhs, double rhs) noexcept
+        {
+            return !std::isnan(lhs) && !std::isnan(rhs) && lhs <= rhs;
+        }
+
+        bool cannonOrderedEqual(double lhs, double rhs) noexcept
+        {
+            return !std::isnan(lhs) && !std::isnan(rhs) && lhs == rhs;
+        }
+
         bool cannonRetailContinuousZCross(double targetZ, double previousZ, double currentZ) noexcept
         {
-            if (cannonLessOrUnordered(previousZ, currentZ))
+            if (cannonOrderedLess(previousZ, currentZ))
             {
                 if (cannonLessOrUnordered(targetZ, previousZ))
                     return false;
-                return cannonLessEqualOrUnordered(targetZ, currentZ);
+                return cannonOrderedLessEqual(targetZ, currentZ);
             }
 
             if (cannonLessOrUnordered(targetZ, currentZ))
                 return false;
-            return cannonLessEqualOrUnordered(targetZ, previousZ);
+            return cannonOrderedLessEqual(targetZ, previousZ);
         }
     }
 
@@ -161,44 +160,54 @@ namespace as1
         const float movePlane = candidateGround + vid->moveUpZ();
         const float previousZ = Z();
 
-        if ((vid->spriteTypeId() & 0x00000200u) != 0u &&
-            (vid->properties() & P_GRAVITY) != 0u &&
-            cannonLessEqualOrUnordered(candidate.z, candidateGround) &&
+        auto triggerImpactAnimationSlot = [this, vid](int animationSlot)
+        {
+            // Steam 1.22 helper at 0x46C830: trigger ChildVid/SFX for the
+            // impact slot without leaving the CANNON in that animation.
+            if (vid->childVid[animationSlot] != nullptr)
+            {
+                const int savedAnimation = currentAnimation();
+                setCurrentAnimationDirect(animationSlot);
+                CreateChildForAnimation();
+                setCurrentAnimationDirect(savedAnimation);
+            }
+
+            const int sfx = vid->sfxForAnimation(animationSlot);
+            if (sfx != 0)
+                playSfxAtWorldPosition(sfx);
+        };
+
+        if (cannonOrderedLessEqual(candidate.z, candidateGround) &&
             cannonOrderedGreaterEqual(Z(), currentGround))
         {
-            // Steam 1.22 CANNON::MoveTact (0x4182C0): projectiles, shell
-            // casings and physical ChildVid debris use the CANNON class.  A
-            // ground hit is not ACT_PATH_GROUND.  Retail stops/clamps or
-            // bounces the object here and changes animation to the collision
-            // slots (11/12); once the bounce is exhausted it switches to the
-            // death/rest slot (15), which in turn creates the ChildVid that is
-            // left on the ground.  Skipping this route makes P_BOUNCE objects
-            // fall through the terrain and also skips their collision SFX.
+            // Steam 1.22 CANNON::MoveTact 0x41836D..0x418479: there is no
+            // sprite-type or P_GRAVITY gate before the ground-crossing route.
             candidate.z = Z();
 
             if (currentAnimation() >= 15)
             {
                 Stop();
                 if (candidateGround > currentGround)
-                    ChangeAnimation(11);
+                    triggerImpactAnimationSlot(11);
             }
             else if ((vid->properties() & P_BOUNCE) == 0u)
             {
                 Stop();
                 candidate.z = currentGround;
-                ChangeAnimation(candidateGround <= currentGround ? 12 : 11);
+                triggerImpactAnimationSlot(candidateGround > currentGround ? 11 : 12);
+                ChangeAnimation(15);
             }
             else
             {
-                if (candidateGround <= currentGround)
+                if (cannonLessEqualOrUnordered(candidateGround, currentGround))
                 {
                     const float zSpeed = ZSpeed();
-                    if (zSpeed < -0.022f)
+                    if (cannonOrderedLess(zSpeed, -0.022f))
                     {
                         ChangeAnimation(12);
                         setZSpeedDirect(zSpeed * -0.5f);
                     }
-                    else if (zSpeed <= 0.005f)
+                    else if (cannonLessEqualOrUnordered(zSpeed, 0.005f))
                     {
                         setZSpeedDirect(0.0f);
                         ChangeAnimation(15);
@@ -220,34 +229,36 @@ namespace as1
             candidate.x = X();
             candidate.y = Y();
         }
-        else if (cannonOrderedNotEqual(Z(), candidate.z) &&
+        else if (cannonNotEqualOrUnordered(Z(), candidate.z) &&
                  (vid->properties() & P_GRAVITY) == 0u &&
-                 cannonOrderedNotEqual(movePlane, 0.0f))
+                 cannonNotEqualOrUnordered(movePlane, 0.0f))
         {
-            bool clampToMovePlane = false;
-            if (cannonLessOrUnordered(Z(), movePlane))
+            // Steam 1.22 0x4184B2..0x4184E7.
+            if (cannonOrderedLess(Z(), movePlane))
             {
-                clampToMovePlane = !cannonLessOrUnordered(candidate.z, movePlane);
+                if (!cannonOrderedLess(candidate.z, movePlane))
+                {
+                    candidate.z = movePlane;
+                    setZSpeedDirect(0.0f);
+                }
             }
-            else if (cannonLessEqualOrUnordered(Z(), movePlane))
+            else if (cannonOrderedLess(movePlane, Z()))
             {
-                // The first branch rejected < and unordered, so this is the
-                clampToMovePlane = (vid->properties() & P_SELFMOVING) == 0u;
+                if (cannonLessOrUnordered(candidate.z, movePlane))
+                {
+                    candidate.z = movePlane;
+                    setZSpeedDirect(0.0f);
+                }
             }
-            else
+            else if ((vid->properties() & P_SELFMOVING) == 0u)
             {
-                clampToMovePlane = cannonLessOrUnordered(candidate.z, movePlane);
-            }
-
-            if (clampToMovePlane)
-            {
-                candidate.z = movePlane;
+                // Equality/unordered: retail only zeroes Z speed here.
                 setZSpeedDirect(0.0f);
             }
         }
 
-        if (cannonOrderedNotEqual(X(), candidate.x) ||
-            cannonOrderedNotEqual(Y(), candidate.y))
+        if (cannonNotEqualOrUnordered(X(), candidate.x) ||
+            cannonNotEqualOrUnordered(Y(), candidate.y))
         {
             if (CanPlaceWithCrush(candidate.x, candidate.y, candidate.z) != nullptr)
             {
@@ -259,21 +270,21 @@ namespace as1
                 ChangeCoor(candidate.x, candidate.y, candidate.z);
                 if (currentAnimation() < 15 &&
                     (vid->properties() & P_GRAVITY) == 0u &&
-                    (cannonLessOrUnordered(X(), -220.0f) ||
-                     cannonLessOrUnordered(Y(), -200.0f) ||
-                     cannonLessOrUnordered(owner->SizeX() + 220.0f, X()) ||
-                     cannonLessOrUnordered(owner->SizeY() + 200.0f, Y())))
+                    (cannonOrderedLess(X(), -220.0f) ||
+                     cannonOrderedLess(Y(), -200.0f) ||
+                     cannonOrderedLess(owner->SizeX() + 220.0f, X()) ||
+                     cannonOrderedLess(owner->SizeY() + 200.0f, Y())))
                     ChangeAnimation(15);
             }
         }
-        if (cannonOrderedNotEqual(Z(), candidate.z))
+        if (cannonNotEqualOrUnordered(Z(), candidate.z))
             ChangeCoor(X(), Y(), candidate.z);
 
         SPRITE* const target = goalSprite();
         if (!target)
         {
-            if (cannonLessOrUnordered(vid->moveUpZ(), 0.0f) &&
-                cannonLessOrUnordered(ZSpeed(), 0.0f))
+            if (cannonOrderedLess(vid->moveUpZ(), 0.0f) &&
+                cannonOrderedLess(ZSpeed(), 0.0f))
             {
                 const std::uint32_t deltaMs = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
                 RotateTact(directionIndex() + 32, deltaMs);
@@ -307,7 +318,7 @@ namespace as1
             }
             else
             {
-                const int reverse = cannonLessOrUnordered(Speed(), 0.0f) ? 0x80 : 0;
+                const int reverse = cannonOrderedLess(Speed(), 0.0f) ? 0x80 : 0;
                 const int desired = (RetailDirectionFromFloatXY(
                     target->X() - X(), target->Y() - Y()).Int() + reverse) & 0xFF;
                 const std::uint32_t deltaMs = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
@@ -317,14 +328,15 @@ namespace as1
                     m_cannonMotionFlags |= 1;
                     StartMove();
                 }
-                else if (target->Z() >= Z() || cannonEqualOrUnordered(distance, 0.0f))
+                else if (cannonLessEqualOrUnordered(Z(), target->Z()) ||
+                         cannonOrderedEqual(distance, 0.0f))
                 {
                     setZSpeedDirect(0.0f);
                 }
                 else
                 {
                     float zSpeed = ((target->Z() - Z()) / distance) / 10.0f;
-                    if (cannonLessOrUnordered(zSpeed, -vid->maximumZSpeed()))
+                    if (cannonOrderedLess(zSpeed, -vid->maximumZSpeed()))
                         zSpeed = -vid->maximumZSpeed();
                     setZSpeedDirect(zSpeed);
                 }
@@ -333,7 +345,7 @@ namespace as1
         else if (distance > 100.0f)
         {
             const int previousDir = directionIndex() & 0xFF;
-            const int reverse = cannonLessOrUnordered(Speed(), 0.0f) ? 0x80 : 0;
+            const int reverse = cannonOrderedLess(Speed(), 0.0f) ? 0x80 : 0;
             const int desired = (RetailDirectionFromFloatXY(
                 target->X() - X(), target->Y() - Y()).Int() + reverse) & 0xFF;
             const std::uint32_t deltaMs = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
@@ -350,7 +362,8 @@ namespace as1
 
         const VID* const targetVid = target->Vid();
         const std::uint32_t flags = runtimeFlags();
-        bool xyOverlap = (flags & 0x00006000u) == 0x00006000u;
+        bool xyOverlap =
+            (flags & SPRITE::CrossedGoalAxesMask) == SPRITE::CrossedGoalAxesMask;
         if (!xyOverlap)
         {
             xyOverlap = vid->halfSizeX() + targetVid->halfSizeX() > std::fabs(X() - target->X()) &&
@@ -371,9 +384,9 @@ namespace as1
         }
 
         if (!overlapping && (vid->properties() & P_SELFMOVING) != 0u)
-            overlapping = cannonLessOrUnordered(std::fabs(target->Z() - Z()), 20.0f) &&
-                          cannonLessOrUnordered(std::fabs(target->X() - X()), 10.0f) &&
-                          cannonLessOrUnordered(std::fabs(target->Y() - Y()), 10.0f);
+            overlapping = cannonOrderedLess(std::fabs(target->Z() - Z()), 20.0f) &&
+                          cannonOrderedLess(std::fabs(target->X() - X()), 10.0f) &&
+                          cannonOrderedLess(std::fabs(target->Y() - Y()), 10.0f);
         if (overlapping)
         {
             Stop();
