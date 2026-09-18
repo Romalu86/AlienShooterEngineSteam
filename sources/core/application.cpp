@@ -75,27 +75,6 @@ namespace as1 { namespace core
         SCRIPT g_applicationScriptOwner;
 #endif
 
-        int subtractFloatToIntTruncated(float lhs, float rhs) noexcept
-        {
-
-            const long double value =
-                static_cast<long double>(lhs) - static_cast<long double>(rhs);
-            if (!std::isfinite(value) ||
-                value < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                value > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(value));
-            return static_cast<int>(static_cast<std::uint32_t>(
-                static_cast<std::uint64_t>(converted)));
-        }
-
-        int subtractRoundedFloatToInt(float lhs, float rhs) noexcept
-        {
-            const float rounded = static_cast<float>(
-                static_cast<long double>(lhs) - static_cast<long double>(rhs));
-            return subtractFloatToIntTruncated(rounded, 0.0f);
-        }
-
         bool debugPassReady(const ApplicationDebugPassContext& context)
         {
             (void)context;
@@ -163,10 +142,10 @@ namespace as1 { namespace core
                 {
                     const int reverse = Speed() >= 0.0f ? 0 : 128;
 
-                    const int dx = subtractRoundedFloatToInt(target->X(), X());
-                    const int dy = subtractFloatToIntTruncated(target->Y(), Y());
-
-                    const int desired = AngleFromXY(dx, dy, nullptr).Int() + reverse;
+                    // Steam 1.22 ASM (0x434DEE -> 0x445600) passes the
+                    // target deltas as floats to the retail direction helper.
+                    const int desired = RetailDirectionFromFloatXY(
+                        target->X() - X(), target->Y() - Y()).Int() + reverse;
                     const std::uint32_t delta = CurrentTimeMilliseconds() - PreviousWorldTimeMilliseconds();
                     const int turn = GlideDirection(ANGLE(static_cast<unsigned char>(desired))).Int();
                     RotateTact(turn, delta);
