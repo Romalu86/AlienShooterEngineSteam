@@ -826,17 +826,19 @@ namespace as1
 
         bool draw(float x, float y, DWORD color, const char* text, DWORD flags, std::string* status)
         {
+            (void)status;
             if (!m_device)
                 return false;
-            if (m_savedStateBlock)
-                m_savedStateBlock->Capture();
-            if (m_textStateBlock)
-                m_textStateBlock->Apply();
+
+            // Steam 1.22 ASM (0x41B710): the recorded state blocks are assumed
+            // to exist. Capture the caller state, apply the text state, and do
+            // not add any texture/state writes outside the recorded text block.
+            m_savedStateBlock->Capture();
+            m_textStateBlock->Apply();
 
             m_device->SetFVF(kTextVertexFVF);
             m_device->SetPixelShader(nullptr);
             m_device->SetStreamSource(0, m_vertexBuffer, 0u, kTextVertexStride);
-            m_device->SetTexture(0, m_texture);
             if ((flags & 4u) != 0)
             {
                 m_device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
@@ -844,18 +846,11 @@ namespace as1
             }
 
             void* raw = nullptr;
-            HRESULT hr = m_vertexBuffer->Lock(0, 0, &raw, kTextVertexLockFlags);
-            if (FAILED(hr) || !raw)
-            {
-                if (status)
-                    *status = hresultText("font vertex lock", hr);
-                return false;
-            }
+            (void)m_vertexBuffer->Lock(0, 0, &raw, kTextVertexLockFlags);
 
             GraphTextVertex* vertices = reinterpret_cast<GraphTextVertex*>(raw);
             UINT primitiveCount = 0;
             UINT vertexCount = 0;
-            bool ok = true;
             float cursorX = x;
             float cursorY = y;
             const float lineStep = (m_glyphs[0].bottom - m_glyphs[0].top) * static_cast<float>(m_textureHeight);
@@ -896,23 +891,13 @@ namespace as1
                 std::copy(quad, quad + 6, vertices + vertexCount);
                 vertexCount += 6u;
                 primitiveCount += 2u;
+
                 if (primitiveCount > 98u)
                 {
-                    hr = flush(primitiveCount, status);
-                    if (FAILED(hr))
-                    {
-                        ok = false;
-                        break;
-                    }
+                    (void)m_vertexBuffer->Unlock();
+                    (void)m_device->DrawPrimitive(D3DPT_TRIANGLELIST, 0, primitiveCount);
                     raw = nullptr;
-                    hr = m_vertexBuffer->Lock(0, 0, &raw, kTextVertexLockFlags);
-                    if (FAILED(hr) || !raw)
-                    {
-                        if (status)
-                            *status = hresultText("font vertex lock", hr);
-                        ok = false;
-                        break;
-                    }
+                    (void)m_vertexBuffer->Lock(0, 0, &raw, kTextVertexLockFlags);
                     vertices = reinterpret_cast<GraphTextVertex*>(raw);
                     primitiveCount = 0;
                     vertexCount = 0;
@@ -920,27 +905,12 @@ namespace as1
                 cursorX += glyphW;
             }
 
-            HRESULT unlockHr = m_vertexBuffer->Unlock();
-            if (FAILED(unlockHr) && ok)
-            {
-                if (status)
-                    *status = hresultText("font vertex unlock", unlockHr);
-                ok = false;
-            }
-            if (ok && primitiveCount > 0)
-            {
-                hr = m_device->DrawPrimitive(D3DPT_TRIANGLELIST, 0, primitiveCount);
-                if (FAILED(hr))
-                {
-                    if (status)
-                        *status = hresultText("font draw", hr);
-                    ok = false;
-                }
-            }
+            (void)m_vertexBuffer->Unlock();
+            if (primitiveCount != 0u)
+                (void)m_device->DrawPrimitive(D3DPT_TRIANGLELIST, 0, primitiveCount);
 
-            if (m_savedStateBlock)
-                m_savedStateBlock->Apply();
-            return ok;
+            m_savedStateBlock->Apply();
+            return true;
         }
 #endif
 
@@ -1097,7 +1067,6 @@ namespace as1
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(22), 3u);
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(52), 0u);
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(136), 1u);
-            m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(40), 0u);
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(152), 0u);
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(151), 0u);
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(167), 0u);

@@ -360,13 +360,19 @@ namespace as1
                 static_cast<long double>(value) - static_cast<long double>(subtrahend));
         }
 
-        float addThenSubtractRounded(float base, float addend, float subtractend) noexcept
+        float addThenSubtractF32(float base, float addend, float subtractend) noexcept
         {
-
-            return static_cast<float>(
-                static_cast<long double>(base) +
-                static_cast<long double>(addend) -
-                static_cast<long double>(subtractend));
+#if defined(_MSC_VER) && defined(_M_IX86)
+            // Steam 1.22 ASM (0x46B780): ADDSS followed by SUBSS.  Keep the
+            // binary32 rounding point after each operation; do not promote the
+            // collision push vector to double/long double.
+            __m128 value = _mm_add_ss(_mm_set_ss(base), _mm_set_ss(addend));
+            value = _mm_sub_ss(value, _mm_set_ss(subtractend));
+            return _mm_cvtss_f32(value);
+#else
+            const float added = base + addend;
+            return added - subtractend;
+#endif
         }
 
         float spriteWeightedQuarterF32(float primary, float secondary) noexcept
@@ -994,23 +1000,43 @@ namespace as1
 
     void SPRITE::initializeRetailStartupTrigTables() noexcept
     {
-        const float kScale4096 = 4096.0f;
-        const float kScaleRadians = 0.00017262212f;
+        // Steam 1.22 sub_43C540 builds the auxiliary direction tables with
+        // packed single-precision SSE: aux = (base * 4096.0f) / 5793.0f.
+        // Do not replace the division with an approximate reciprocal: these
+        // tables are consumed by several retail physics/effect paths.
+#if defined(_MSC_VER) && defined(_M_IX86)
+        const __m128 scale = _mm_set1_ps(4096.0f);
+        const __m128 divisor = _mm_set1_ps(5793.0f);
+        float* const table = reinterpret_cast<float*>(g_retailDirectionTrigWindow.data());
+        for (std::size_t i = 0; i < 256u; i += 8u)
+        {
+            __m128 value = _mm_loadu_ps(table + i);
+            value = _mm_div_ps(_mm_mul_ps(value, scale), divisor);
+            _mm_storeu_ps(table + 512u + i, value);
+
+            value = _mm_loadu_ps(table + 256u + i);
+            value = _mm_div_ps(_mm_mul_ps(value, scale), divisor);
+            _mm_storeu_ps(table + 768u + i, value);
+
+            value = _mm_loadu_ps(table + i + 4u);
+            value = _mm_div_ps(_mm_mul_ps(value, scale), divisor);
+            _mm_storeu_ps(table + 512u + i + 4u, value);
+
+            value = _mm_loadu_ps(table + 256u + i + 4u);
+            value = _mm_div_ps(_mm_mul_ps(value, scale), divisor);
+            _mm_storeu_ps(table + 768u + i + 4u, value);
+        }
+#else
         for (std::size_t i = 0; i < 256u; ++i)
         {
             const float sourceSin = spriteFloatFromBits(g_retailDirectionTrigWindow[i]);
             const float sourceCosWindow = spriteFloatFromBits(g_retailDirectionTrigWindow[256u + i]);
-            const float derivedSin = static_cast<float>(
-                static_cast<long double>(sourceSin) *
-                static_cast<long double>(kScale4096) *
-                static_cast<long double>(kScaleRadians));
-            const float derivedCosWindow = static_cast<float>(
-                static_cast<long double>(sourceCosWindow) *
-                static_cast<long double>(kScale4096) *
-                static_cast<long double>(kScaleRadians));
+            const float derivedSin = (sourceSin * 4096.0f) / 5793.0f;
+            const float derivedCosWindow = (sourceCosWindow * 4096.0f) / 5793.0f;
             std::memcpy(&g_retailDirectionTrigWindow[512u + i], &derivedSin, sizeof(derivedSin));
             std::memcpy(&g_retailDirectionTrigWindow[768u + i], &derivedCosWindow, sizeof(derivedCosWindow));
         }
+#endif
     }
 
     float SPRITE::rawDirectionSin(int index) noexcept
@@ -4771,9 +4797,9 @@ namespace as1
             VID* const blockerVid = blocker->Vid();
             if ((static_cast<std::uint32_t>(blockerVid->weaponFlags()) & 0x00000040u) != 0u)
             {
-                const float pushedXInitial = addThenSubtractRounded(
+                const float pushedXInitial = addThenSubtractF32(
                     blocker->X(), *xOut, X());
-                const float pushedYInitial = addThenSubtractRounded(
+                const float pushedYInitial = addThenSubtractF32(
                     blocker->Y(), *yOut, Y());
                 float pushedX = pushedXInitial;
                 float pushedY = pushedYInitial;
@@ -9710,9 +9736,13 @@ namespace as1
                         m_goalSprite->X() - X(), m_goalSprite->Y() - Y()).Int();
                 }
                 const std::uint32_t direction = static_cast<std::uint32_t>(movementDirection) & 0xFFu;
+                // Steam 1.22 ASM sub_46E7B0 uses the base direction tables
+                // (0x4F94A0 sin / 0x4F98A0 cos) for planar sprite movement.
+                // The auxiliary tables at 0x4F9CA0 / 0x4FA0A0 are scaled at
+                // startup by 4096/5793 (~0.70706) and must not be used here.
                 advancePlanarPosition(deltaMs, m_speed,
-                                    spriteFloatFromBits(g_retailDirectionTrigWindow[512u + direction]),
-                                    spriteFloatFromBits(g_retailDirectionTrigWindow[768u + direction]),
+                                    directionSin(static_cast<int>(direction)),
+                                    directionCos(static_cast<int>(direction)),
                                     *xOut, *yOut);
                 if (windProperty)
                 {
