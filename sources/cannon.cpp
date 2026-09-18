@@ -16,43 +16,46 @@ namespace as1
 {
     namespace
     {
-        bool cannonLessOrUnordered(double lhs, double rhs) noexcept
+        // Steam 1.22 CANNON paths compare single-precision values directly with
+        // COMISS/UCOMISS.  Keep the predicates in float as well: promoting the
+        // operands to double changes both codegen and
+        // NaN/unordered behaviour around the retail branches.
+        __forceinline bool cannonLessOrUnordered(float lhs, float rhs) noexcept
         {
-            return std::isnan(lhs) || std::isnan(rhs) || lhs < rhs;
+            return !(lhs >= rhs);
         }
 
-        bool cannonLessEqualOrUnordered(double lhs, double rhs) noexcept
+        __forceinline bool cannonLessEqualOrUnordered(float lhs, float rhs) noexcept
         {
-            return std::isnan(lhs) || std::isnan(rhs) || lhs <= rhs;
+            return !(lhs > rhs);
         }
 
-        bool cannonOrderedGreaterEqual(double lhs, double rhs) noexcept
+        __forceinline bool cannonOrderedGreaterEqual(float lhs, float rhs) noexcept
         {
-            // Accept only an ordered greater-than-or-equal comparison; NaN is rejected.
-            return !std::isnan(lhs) && !std::isnan(rhs) && lhs >= rhs;
+            return lhs >= rhs;
         }
 
-        bool cannonNotEqualOrUnordered(double lhs, double rhs) noexcept
+        __forceinline bool cannonNotEqualOrUnordered(float lhs, float rhs) noexcept
         {
-            return std::isnan(lhs) || std::isnan(rhs) || lhs != rhs;
+            return !(lhs == rhs);
         }
 
-        bool cannonOrderedLess(double lhs, double rhs) noexcept
+        __forceinline bool cannonOrderedLess(float lhs, float rhs) noexcept
         {
-            return !std::isnan(lhs) && !std::isnan(rhs) && lhs < rhs;
+            return lhs < rhs;
         }
 
-        bool cannonOrderedLessEqual(double lhs, double rhs) noexcept
+        __forceinline bool cannonOrderedLessEqual(float lhs, float rhs) noexcept
         {
-            return !std::isnan(lhs) && !std::isnan(rhs) && lhs <= rhs;
+            return lhs <= rhs;
         }
 
-        bool cannonOrderedEqual(double lhs, double rhs) noexcept
+        __forceinline bool cannonOrderedEqual(float lhs, float rhs) noexcept
         {
-            return !std::isnan(lhs) && !std::isnan(rhs) && lhs == rhs;
+            return lhs == rhs;
         }
 
-        bool cannonRetailContinuousZCross(double targetZ, double previousZ, double currentZ) noexcept
+        __forceinline bool cannonRetailContinuousZCross(float targetZ, float previousZ, float currentZ) noexcept
         {
             if (cannonOrderedLess(previousZ, currentZ))
             {

@@ -11,6 +11,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <new>
+#include <limits>
+#include <xmmintrin.h>
 
 namespace as1
 {
@@ -116,6 +118,23 @@ namespace as1
             return static_cast<int>(static_cast<std::int16_t>(value));
         }
 
+        int hardwareZWrapAdd32(int lhs, int rhs) noexcept
+        {
+            return static_cast<std::int32_t>(static_cast<std::uint32_t>(lhs) +
+                                             static_cast<std::uint32_t>(rhs));
+        }
+
+        int hardwareZCvttss2si(float value) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (!(value >= -2147483648.0f && value < 2147483648.0f))
+                return std::numeric_limits<std::int32_t>::min();
+            return static_cast<int>(value);
+#endif
+        }
+
         WORD composeOpaqueHardwareZPixel(WORD sourceZ, WORD sourceColor, WORD destinationZ, WORD baseDepthWord)
         {
 
@@ -205,8 +224,10 @@ namespace as1
         const int sizeY = signedWord(vidHeight());
         const float cameraX = appDraw.cameraShiftX();
         const float cameraY = appDraw.cameraShiftY();
-        const int drawLeft = static_cast<int>(sprite->X() - cameraX - static_cast<float>(sizeX / 2));
-        int drawTop = static_cast<int>(sprite->Y() - sprite->Z() - cameraY - static_cast<float>(sizeY / 2));
+        const int drawLeft = hardwareZCvttss2si(
+            sprite->X() - cameraX - static_cast<float>(sizeX / 2));
+        int drawTop = hardwareZCvttss2si(
+            sprite->Y() - sprite->Z() - cameraY - static_cast<float>(sizeY / 2));
 
         const GraphViewportState& viewport = graph->viewportState();
         const int clipLeft = g_softwareClipLeft;
@@ -218,17 +239,17 @@ namespace as1
             drawTop + sizeY < clipTop || drawTop >= clipBottom)
             return;
 
-        int baseDepth = static_cast<int>(sprite->Z() * 8.0f);
+        int baseDepth = hardwareZCvttss2si(sprite->Z() * 8.0f);
         if ((property & P_ALWAYSTOP) != 0u && baseDepth < 0x3FFF)
         {
-            baseDepth += 0x3FFF;
+            baseDepth = hardwareZWrapAdd32(baseDepth, 0x3FFF);
         }
         else if ((property & P_WAVE) != 0u)
         {
-            const int waveDepth = static_cast<int>(
+            const int waveDepth = hardwareZCvttss2si(
                 SPRITE::rawDirectionSin(static_cast<int>((core::CurrentTimeMilliseconds() >> 3u) & 0xFFu)) *
                 moveUpZ() * 8.0f);
-            baseDepth += waveDepth;
+            baseDepth = hardwareZWrapAdd32(baseDepth, waveDepth);
             drawTop += waveDepth / -8;
         }
 
@@ -369,6 +390,17 @@ namespace as1
         (void)screenDepth;
         return;
 #endif
+    }
+
+    void VID_HARDWARE_Z::DrawToVid(SPRITE* sprite, void* texSize, BASE_TEXTURE* texture, BASE_TEXTURE* zTexture)
+    {
+        // Steam 1.22 sub_43A9B0 is a distinct empty virtual slot (ret 0x10).
+        // Keep the override separate from VID::DrawToVid so the vtable layout/target
+        // matches the original class even though the observable body is a no-op.
+        (void)sprite;
+        (void)texSize;
+        (void)texture;
+        (void)zTexture;
     }
 
     bool VID_HARDWARE_Z::transparencyCheck() const

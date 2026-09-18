@@ -5,11 +5,11 @@
 
 namespace as1
 {
-    class Crc32
+    class Crc3232
     {
     public:
-        Crc32() = default;
-        Crc32(const void* data, unsigned int size);
+        Crc3232() = default;
+        Crc3232(const void* data, unsigned int size);
 
         std::uint32_t Update(const void* data, unsigned int size);
         void Reset();
@@ -22,6 +22,6 @@ namespace as1
         std::uint32_t m_crc = 0;
     };
 
-    std::uint32_t updateCrc32Bytes(std::uint32_t& crc, const void* data, int size);
-    std::uint32_t UpdateCrc32(std::uint32_t& crc, const void* data, unsigned int size);
+    std::uint32_t updateCrc3232Bytes(std::uint32_t& crc, const void* data, int size);
+    std::uint32_t UpdateCrc3232(std::uint32_t& crc, const void* data, unsigned int size);
 }

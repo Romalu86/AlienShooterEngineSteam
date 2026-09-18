@@ -12,7 +12,6 @@ namespace as1
         ~RAIL() override;
         RAIL* railScalarDeletingDestructor(unsigned char flags) noexcept;
         int Action(int opcode, std::intptr_t argument1Carrier, int argument2Carrier, int argument3Carrier) override;
-        void MoveTact() override;
         int dispatchRailActionOpcode(int opcode, int actionArgument1, float actionArgument2, int actionArgument3);
         int handleRailDamageAction(int actionArgument1, float actionArgument2, int actionArgument3);
         int rebuildRailNodes(int direction, float moveUpZ);

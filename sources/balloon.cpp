@@ -60,35 +60,16 @@ namespace as1
             return child && child->Vid() == target->Vid()->linkedVid();
         }
 
-        bool balloonLessOrUnordered(long double lhs, long double rhs) noexcept
+        __forceinline bool balloonOrderedLess(float lhs, float rhs) noexcept
         {
-            return std::isnan(lhs) || std::isnan(rhs) || lhs < rhs;
+            // Steam uses COMISS range,distance followed by JBE to reject the candidate.
+            // Unordered therefore follows the reject path; only ordered lhs < rhs passes.
+            return lhs < rhs;
         }
 
-        bool balloonEqualOrUnordered(long double lhs, long double rhs) noexcept
+        __forceinline bool balloonNotEqualOrUnordered(float lhs, float rhs) noexcept
         {
-
-            return std::isnan(lhs) || std::isnan(rhs) || lhs == rhs;
-        }
-
-        bool balloonLessOrUnordered(double lhs, double rhs) noexcept
-        {
-            return balloonLessOrUnordered(static_cast<long double>(lhs), static_cast<long double>(rhs));
-        }
-
-        bool balloonEqualOrUnordered(double lhs, double rhs) noexcept
-        {
-            return balloonEqualOrUnordered(static_cast<long double>(lhs), static_cast<long double>(rhs));
-        }
-
-        bool balloonNotEqualOrUnordered(double lhs, double rhs) noexcept
-        {
-            return std::isnan(lhs) || std::isnan(rhs) || lhs != rhs;
-        }
-
-        bool balloonOrderedGreaterEqual(double lhs, double rhs) noexcept
-        {
-            return !std::isnan(lhs) && !std::isnan(rhs) && lhs >= rhs;
+            return !(lhs == rhs);
         }
 
         float balloonTargetDistance(const BALLOON* self, const SPRITE* candidate) noexcept
@@ -196,9 +177,7 @@ namespace as1
                 DWORD flags = runtimeFlags() & ~SPRITE::MovementStartedFlag;
                 setZSpeedDirect(vid->maximumZSpeed());
                 setSpeedDirect(0.0f);
-                if (balloonOrderedGreaterEqual(
-                        static_cast<double>(Z()),
-                        static_cast<double>(ground + vid->moveUpZ())))
+                if (Z() >= ground + vid->moveUpZ())
                 {
                     flags |= SPRITE::MovementStartedFlag;
                     setAttachmentPhase(0u);
@@ -286,12 +265,11 @@ namespace as1
                 }
                 if (!rotateOnly)
                 {
-                    const long double distance = approximatePlanarDistance(
+                    const float distance = approximatePlanarDistance(
                         target->X() - carrier->X(),
                         target->Y() - carrier->Y());
-                    if (!balloonLessOrUnordered(
-                            distance,
-                            static_cast<long double>(carrier->Vid()->weaponBattleRange())))
+                    if (!balloonOrderedLess(
+                            distance, carrier->Vid()->weaponBattleRange()))
                         rotateOnly = true;
                 }
                 if (!rotateOnly && actionTimer() != 0u)
@@ -321,10 +299,8 @@ namespace as1
             SPRITE* const best = bestTargetSprite();
             if (best && best != target)
             {
-                const long double distance = approximatePlanarDistance(best->X() - X(), best->Y() - Y());
-                if (balloonLessOrUnordered(
-                        distance,
-                        static_cast<long double>(Vid()->weaponBattleRange())))
+                const float distance = approximatePlanarDistance(best->X() - X(), best->Y() - Y());
+                if (balloonOrderedLess(distance, Vid()->weaponBattleRange()))
                     setAttackCommandForTarget(best);
             }
 
@@ -347,14 +323,15 @@ namespace as1
         SPRITE* target = goalSprite();
         if (best && best != target)
         {
-            const double distance = balloonTargetDistance(this, best);
-            if (balloonLessOrUnordered(
-                    static_cast<long double>(distance),
-                    static_cast<long double>(Vid()->weaponDetectRange())) &&
+            const float distance = balloonTargetDistance(this, best);
+            if (balloonOrderedLess(distance, Vid()->weaponDetectRange()) &&
                 ammoCount() > 0)
                 setAttackCommandForTarget(best);
         }
 
+        // Steam reloads the current goal field after sub_46A750.  Using the
+        // pre-call local target can immediately discard a newly selected attack target.
+        target = goalSprite();
         if (ammoCount() <= 0 || !target)
         {
             bool keepTarget = false;
@@ -464,7 +441,7 @@ namespace as1
 
         if (SPRITE* const target = goalSprite())
         {
-            if (balloonNotEqualOrUnordered(Speed(), 0.0))
+            if (balloonNotEqualOrUnordered(Speed(), 0.0f))
             {
                 const int reverse = Speed() < 0.0f ? 0x80 : 0;
                 const int desired = (RetailDirectionFromFloatXY(

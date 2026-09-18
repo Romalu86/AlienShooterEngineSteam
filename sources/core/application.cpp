@@ -28,6 +28,10 @@
 #include <new>
 #include <limits>
 
+#if defined(_MSC_VER) && defined(_M_IX86)
+#include <xmmintrin.h>
+#endif
+
 namespace as1 { namespace core
 {
     std::uint32_t g_currentTimeMilliseconds = 0;
@@ -140,7 +144,11 @@ namespace as1 { namespace core
                 SPRITE* const target = goalSprite();
                 if (target && (runtimeFlags() & SPRITE::CommandBitsMask) == 4u)
                 {
-                    const int reverse = Speed() >= 0.0f ? 0 : 128;
+                    // Steam 1.22 uses COMISS 0.0f,Speed + SETBE here.  An
+                    // unordered (NaN) speed follows the non-reversed route, just
+                    // like zero/positive speed; only an ordered negative speed
+                    // adds 0x80 to the requested direction.
+                    const int reverse = Speed() < 0.0f ? 128 : 0;
 
                     // Steam 1.22 ASM (0x434DEE -> 0x445600) passes the
                     // target deltas as floats to the retail direction helper.
@@ -642,16 +650,6 @@ namespace as1 { namespace core
 #endif
     }
 
-    double ApplicationDrawDispatcherState::cameraRelativeX(float value) const noexcept
-    {
-        return static_cast<double>(value) - static_cast<double>(cameraShiftX());
-    }
-
-    double ApplicationDrawDispatcherState::cameraRelativeY(float value) const noexcept
-    {
-        return static_cast<double>(value) - static_cast<double>(cameraShiftY());
-    }
-
     void ApplicationDrawDispatcherState::setCameraShiftX(float value) noexcept
     {
 #ifdef _WIN32
@@ -1037,31 +1035,44 @@ namespace as1 { namespace core
 
     namespace
     {
+        int drawPassCvttss2si(float value) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (!(value >= -2147483648.0f && value < 2147483648.0f))
+                return std::numeric_limits<std::int32_t>::min();
+            return static_cast<int>(value);
+#endif
+        }
+
         int drawPassConvertFloatToInt32(float value) noexcept
         {
-            const long double d = static_cast<long double>(value);
-            if (!std::isfinite(d) || d >= 9223372036854775808.0L || d < -9223372036854775808.0L)
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+            // Steam 1.22 sub_43A4A0 uses CVTTSS2SI directly for sprite X/Y.
+            return drawPassCvttss2si(value);
         }
 
         int drawPassMultiplyAddAndConvertToInt32(float value, float scale, float addend) noexcept
         {
-            const long double d = static_cast<long double>(value) * static_cast<long double>(scale) + static_cast<long double>(addend);
-            if (!std::isfinite(d) || d >= 9223372036854775808.0L || d < -9223372036854775808.0L)
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+            // MULSS -> ADDSS -> CVTTSS2SI for the viewport center.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            __m128 v = _mm_mul_ss(_mm_set_ss(value), _mm_set_ss(scale));
+            v = _mm_add_ss(v, _mm_set_ss(addend));
+            return _mm_cvtt_ss2si(v);
+#else
+            const float scaled = value * scale;
+            return drawPassCvttss2si(scaled + addend);
+#endif
         }
 
         int drawPassSubtractAndConvertToInt32(float lhs, float rhs) noexcept
         {
-            const long double d = static_cast<long double>(lhs) - static_cast<long double>(rhs);
-            if (!std::isfinite(d) || d >= 9223372036854775808.0L || d < -9223372036854775808.0L)
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+            // SUBSS -> CVTTSS2SI for Y-Z culling.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_sub_ss(_mm_set_ss(lhs), _mm_set_ss(rhs)));
+#else
+            return drawPassCvttss2si(lhs - rhs);
+#endif
         }
 
         int drawSpriteAndCaptureReturnValue(SPRITE* sprite) noexcept
@@ -1192,10 +1203,17 @@ namespace as1 { namespace core
             return nullptr;
         VID* const vid = candidate->Vid();
         const float halfX = vid->halfSizeX();
-        if (candidate->X() - halfX > x || x > candidate->X() + halfX)
+        const float lowerX = candidate->X() - halfX;
+        const float upperX = candidate->X() + halfX;
+        // Steam 1.22 sub_43BD20 uses COMISS/JB for both bounds: the point
+        // must be ordered and inside the inclusive interval.  Negated C++
+        // greater-than checks incorrectly accepted NaNs.
+        if (!(x >= lowerX) || !(upperX >= x))
             return nullptr;
         const float halfY = vid->halfSizeY();
-        if (candidate->Y() - halfY > y || y > candidate->Y() + halfY)
+        const float lowerY = candidate->Y() - halfY;
+        const float upperY = candidate->Y() + halfY;
+        if (!(y >= lowerY) || !(upperY >= y))
             return nullptr;
         return candidate;
     }
@@ -1431,9 +1449,9 @@ namespace as1 { namespace core
         }
 
         SPRITE* selected = nullptr;
-        const long double previousDistance = previous
-            ? as1::approximatePlanarDistance(x - previous->X(), y - previous->Y())
-            : -1.0L;
+        const float previousDistance = previous
+            ? static_cast<float>(as1::approximatePlanarDistance(x - previous->X(), y - previous->Y()))
+            : -1.0f;
 
         float bestDistance = radius;
 
@@ -1454,16 +1472,17 @@ namespace as1 { namespace core
             return true;
         };
 
-        auto acceptMetric = [&](SPRITE* candidate, long double metric) noexcept
+        auto acceptMetric = [&](SPRITE* candidate, float metric) noexcept
         {
+            // Steam 1.22 sub_43AC30 compares binary32 metric/radius with COMISS + JBE.
+            // Both unordered comparisons are rejected; in particular a NaN bestDistance
+            // must not be treated as an invitation to accept the candidate.
             if (!(metric > previousDistance))
                 return;
-            if (metric < static_cast<long double>(bestDistance) ||
-                std::isnan(bestDistance))
-            {
-                bestDistance = static_cast<float>(metric);
-                selected = candidate;
-            }
+            if (!(bestDistance > metric))
+                return;
+            bestDistance = metric;
+            selected = candidate;
         };
 
         auto considerDistance = [&](SPRITE* candidate) noexcept
@@ -1501,7 +1520,8 @@ namespace as1 { namespace core
 
         if ((typeMask & 0x0C) == 0 || (typeMask & 0x673) != 0)
         {
-            if ((filter & 0x0800) != 0 && requestedVid->spriteClassId() == 10u)
+            if ((filter & 0x0800) != 0 &&
+                (requestedVid->spriteClassId() == 10u || requestedVid->spriteClassId() == 19u))
             {
                 SPRITE_LIST& frameList = applicationFrameSpriteList();
                 int index = static_cast<int>(frameList.count()) - 1;

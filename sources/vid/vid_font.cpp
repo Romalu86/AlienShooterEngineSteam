@@ -7,9 +7,43 @@
 
 #include <cmath>
 #include <new>
+#include <cstdint>
+#include <limits>
+#include <xmmintrin.h>
 
 namespace as1
 {
+    namespace
+    {
+        int fontCvttss2si(float value) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (!(value >= -2147483648.0f && value < 2147483648.0f))
+                return std::numeric_limits<std::int32_t>::min();
+            return static_cast<int>(value);
+#endif
+        }
+
+        int fontFtolInt64Low32(float value) noexcept
+        {
+            // sub_479730 does not reuse the CVTTSS2SI result for the font
+            // constructor.  It calls the retail float->int64 helper (sub_47D1A0)
+            // and pushes EAX, i.e. the low 32 bits of the truncated int64.
+            const double widened = static_cast<double>(value);
+            if (!std::isfinite(widened) ||
+                widened >= 9223372036854775808.0 ||
+                widened < -9223372036854775808.0)
+            {
+                // Retail helper returns INT64_MIN; its low DWORD is zero.
+                return 0;
+            }
+            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(widened));
+            return static_cast<std::int32_t>(static_cast<std::uint32_t>(converted));
+        }
+    }
+
     VID_FONT::VID_FONT() = default;
 
     VID_FONT::VID_FONT(const VID_FONT& other)
@@ -41,16 +75,18 @@ namespace as1
 
     void VID_FONT::Load(RESOURCE*)
     {
-        const int sizeX = static_cast<int>(sizeXYZ.x);
-        const int sizeY = static_cast<int>(sizeXYZ.y);
+        const int storedSizeX = fontCvttss2si(sizeXYZ.x);
+        const int storedSizeY = fontCvttss2si(sizeXYZ.y);
 
         frameSpeedDefault = 71u;
         noCadr = 256;
-        setVidWidth(static_cast<short>(sizeX));
-        setVidHeight(static_cast<short>(sizeY));
+        setVidWidth(static_cast<short>(storedSizeX));
+        setVidHeight(static_cast<short>(storedSizeY));
         type = static_cast<WORD>(VID_TYPE_FONT);
 
-        m_fontOwner = createRetailVidFontOwner(vidName, sizeX, sizeY);
+        const int fontSizeX = fontFtolInt64Low32(sizeXYZ.x);
+        const int fontSizeY = fontFtolInt64Low32(sizeXYZ.y);
+        m_fontOwner = createRetailVidFontOwner(vidName, fontSizeX, fontSizeY);
     }
 
     void VID_FONT::Draw(const SPRITE* sprite)
@@ -67,10 +103,6 @@ namespace as1
         (void)drawRetailVidFontOwner(m_fontOwner, x, y, ~selected.first, "", 0u);
     }
 
-    int VID_FONT::HaveShadow() const
-    {
-        return 0;
-    }
 
     void VID_FONT::SetLayer()
     {

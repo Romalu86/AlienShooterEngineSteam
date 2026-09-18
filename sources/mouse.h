@@ -19,6 +19,7 @@ namespace as1
 
 
         int Action(int opcode, std::intptr_t rawVar1, int rawVar2, int rawVar3) override;
+        void Draw() override;
         MOUSE* scalarDeletingDestructor(unsigned char flags) noexcept;
         void destroyMouseState();
         void HardwareOn();

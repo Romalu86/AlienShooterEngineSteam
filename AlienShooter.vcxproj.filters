@@ -142,10 +142,7 @@
     <ClCompile Include="sources\vid\vid_software.cpp">
       <Filter>sources\vid</Filter>
     </ClCompile>
-    <ClCompile Include="sources\vid\vid_software_png.cpp">
-      <Filter>sources\vid</Filter>
-    </ClCompile>
-    <ClCompile Include="sources\vid\vid_software16.cpp">
+<ClCompile Include="sources\vid\vid_software16.cpp">
       <Filter>sources\vid</Filter>
     </ClCompile>
     <ClCompile Include="sources\vid\vid_hardware.cpp">
@@ -322,15 +319,6 @@
     <ClCompile Include="sources\menu.cpp">
       <Filter>sources\menu</Filter>
     </ClCompile>
-    <None Include="sources\menu_item.cpp">
-      <Filter>sources\menu</Filter>
-    </None>
-    <None Include="sources\menu\menu_actions_list.cpp">
-      <Filter>sources\menu</Filter>
-    </None>
-    <None Include="sources\menu\navigation_list.cpp">
-      <Filter>sources\menu</Filter>
-    </None>
     <ClCompile Include="sources\sound\engine.cpp">
       <Filter>sources\sound</Filter>
     </ClCompile>
@@ -423,10 +411,7 @@
     <ClInclude Include="sources\vid\vid_software.h">
       <Filter>sources\vid</Filter>
     </ClInclude>
-    <ClInclude Include="sources\vid\vid_software_png.h">
-      <Filter>sources\vid</Filter>
-    </ClInclude>
-    <ClInclude Include="sources\vid\vid_software16.h">
+<ClInclude Include="sources\vid\vid_software16.h">
       <Filter>sources\vid</Filter>
     </ClInclude>
     <ClInclude Include="sources\vid\vid_hardware.h">
@@ -613,18 +598,6 @@
       <Filter>sources\core</Filter>
     </ClInclude>
     <ClInclude Include="sources\menu.h">
-      <Filter>sources\menu</Filter>
-    </ClInclude>
-    <ClInclude Include="sources\menu_item.h">
-      <Filter>sources\menu</Filter>
-    </ClInclude>
-    <ClInclude Include="sources\menu_const.h">
-      <Filter>sources\menu</Filter>
-    </ClInclude>
-    <ClInclude Include="sources\menu\menu_actions_list.h">
-      <Filter>sources\menu</Filter>
-    </ClInclude>
-    <ClInclude Include="sources\menu\navigation_list.h">
       <Filter>sources\menu</Filter>
     </ClInclude>
     <ClInclude Include="sources\sound\engine.h">

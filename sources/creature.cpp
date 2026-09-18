@@ -31,14 +31,14 @@ namespace as1
             return std::max(delta, minDelta);
         }
 
-        bool creatureOrderedEqual(double lhs, double rhs) noexcept
+        __forceinline bool creatureOrderedEqual(float lhs, float rhs) noexcept
         {
-            return !std::isnan(lhs) && !std::isnan(rhs) && lhs == rhs;
+            return lhs == rhs;
         }
 
-        bool creatureLessOrUnordered(long double lhs, long double rhs) noexcept
+        __forceinline bool creatureOrderedLess(float lhs, float rhs) noexcept
         {
-            return std::isnan(lhs) || std::isnan(rhs) || lhs < rhs;
+            return lhs < rhs;
         }
     }
 
@@ -62,8 +62,8 @@ namespace as1
                     VID* const candidateVid = candidate->Vid();
                     if (candidateVid->spriteClassId() != B_CREATURE)
                         continue;
-                    if (creatureLessOrUnordered(
-                            approximatePlanarDistance(X() - candidate->X(), Y() - candidate->Y()), 150.0L))
+                    if (creatureOrderedLess(
+                            approximatePlanarDistance(X() - candidate->X(), Y() - candidate->Y()), 150.0f))
                         candidate->StartMove();
                 }
             }
@@ -86,7 +86,7 @@ namespace as1
             const DWORD actionBits = runtimeFlags() & SPRITE::CommandBitsMask;
             if (goalSprite() != nullptr && actionBits == 4u)
             {
-                if (creatureOrderedEqual(Speed(), 0.0))
+                if (creatureOrderedEqual(Speed(), 0.0f))
                 {
                     ChangeAnimation(0);
                 }
@@ -103,7 +103,7 @@ namespace as1
                     const int decision = computeAttackDecisionCode(creatureFrameDeltaMilliseconds(Vid(), currentAnimation()));
                     setAttackDecisionCode(decision);
 
-                    if (decision == 1 && creatureOrderedEqual(Speed(), 0.0))
+                    if (decision == 1 && creatureOrderedEqual(Speed(), 0.0f))
                     {
                         bool stop = goalSprite() != nullptr;
                         if (!stop)
@@ -149,7 +149,7 @@ namespace as1
                         {
                             StartMove();
                         }
-                        else if (creatureOrderedEqual(Speed(), 0.0) &&
+                        else if (creatureOrderedEqual(Speed(), 0.0f) &&
                                  (std::rand() % 3) == 0 &&
                                  Vid()->hasAnimation12Content())
                         {
@@ -195,10 +195,14 @@ namespace as1
 
             const REGION* const region = static_cast<const REGION*>(candidate);
             const float halfX = region->regionWidth() * 0.5f;
-            if (candidate->X() - halfX > x || x > candidate->X() + halfX)
+            const float minX = candidate->X() - halfX;
+            const float maxX = candidate->X() + halfX;
+            if (!(x >= minX) || !(x <= maxX))
                 continue;
             const float halfY = region->regionHeight() * 0.5f;
-            if (candidate->Y() - halfY <= y && y <= candidate->Y() + halfY)
+            const float minY = candidate->Y() - halfY;
+            const float maxY = candidate->Y() + halfY;
+            if (y >= minY && y <= maxY)
                 return candidate;
         }
         return nullptr;
@@ -260,7 +264,7 @@ namespace as1
         if (CanPlaceWithCrush(candidate.x, candidate.y, candidate.z) != nullptr)
         {
             // The game logic stops here; it does not invoke the generic
-            // ACT_PATH_BLOCK axis-slide handler.
+            // axis-slide fallback.
             setSpeedDirect(0.0f);
             if (turnTimer() == 0)
                 setTurnTimer(10);
@@ -272,8 +276,8 @@ namespace as1
             const REGION* const region = static_cast<const REGION*>(m_currentRegion);
             const float halfX = region->regionWidth() * 0.5f;
             const float halfY = region->regionHeight() * 0.5f;
-            if (candidate.x < region->X() - halfX || candidate.x > region->X() + halfX ||
-                candidate.y < region->Y() - halfY || candidate.y > region->Y() + halfY)
+            if (!(candidate.x >= region->X() - halfX) || !(candidate.x <= region->X() + halfX) ||
+                !(candidate.y >= region->Y() - halfY) || !(candidate.y <= region->Y() + halfY))
             {
                 SPRITE* const nextRegion = findContainingRegion(candidate.x, candidate.y);
                 if (!nextRegion || nextRegion->Vid() != m_currentRegion->Vid())

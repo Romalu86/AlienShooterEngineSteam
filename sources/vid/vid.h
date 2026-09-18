@@ -37,22 +37,6 @@ namespace as1
     class VID
     {
     public:
-        enum class VidType
-        {
-            type_VID                  = 0,
-            type_VID_BASE_SOFTWARE    = 1,
-            type_VID_SOFTWARE         = 2,
-            type_VID_SOFTWARE_PNG     = 3,
-            type_VID_FONT             = 4,
-            type_VID_SURFACE          = 5,
-            type_VID_SURFACE_SOFTWARE = 6,
-            type_VID_HARD_SOFTWARE    = 7,
-            type_VID_HARDWARE_Z       = 8,
-            type_VID_LIGHT            = 9,
-            type_VID_SOFTWARE16       = 10,
-            type_VID_HARDWARE         = 11
-        };
-
         virtual VID* CreateMirror();                                                   // +0x00
         virtual ~VID();                                                                // +0x04 scalar deleting dtor
         virtual void AddVidToVid(SPRITE* sprite);                                      // +0x08

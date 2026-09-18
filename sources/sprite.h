@@ -505,7 +505,6 @@ namespace as1
 
             EngineChainMetrics* collectEngineChainMetrics(SPRITE* root) noexcept;
             int accumulateEngineChainSprite(SPRITE* sprite) noexcept;
-            int weaponRatioScaledByEight() const noexcept;
         };
                                                                                                                            
                                                                                                                        
@@ -1237,6 +1236,10 @@ namespace as1
         void MoveTact() override;
         void DeletePointerToSprite(SPRITE* sprite) override;
         void DrawDebugOverlay() override;
+        // Steam 1.22 PRIMITIVE vtable +0x20/+0x24. Names are intentionally
+        // ABI-oriented because the retail binary exposes no source identifiers.
+        virtual void primitiveVtableSlot20();
+        virtual void primitiveVtableSlot24(int value);
     };
     class REGION : public SPRITE
     {

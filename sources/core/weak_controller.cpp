@@ -16,6 +16,7 @@
 
 #if defined(_MSC_VER) && defined(_M_IX86)
 #include <xmmintrin.h>
+#include <emmintrin.h>
 #endif
 
 namespace as1
@@ -115,25 +116,18 @@ namespace as1
                 return static_cast<std::int32_t>((u ^ mask) - mask);
             }
 
-            int weakConvertFloatToInt32(float value) noexcept
+            int weakTruncateDoubleToInt32(double value) noexcept
             {
-                const long double d = static_cast<long double>(value);
-                if (!std::isfinite(d) ||
-                    d < static_cast<long double>(INT64_MIN) ||
-                    d > static_cast<long double>(INT64_MAX))
-                    return 0;
-                const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-                return static_cast<int>(static_cast<std::uint32_t>(static_cast<std::uint64_t>(converted)));
-            }
-
-            int weakConvertFloatToInt32(double value) noexcept
-            {
+#if defined(_MSC_VER) && defined(_M_IX86)
+                return _mm_cvttsd_si32(_mm_set_sd(value));
+#else
+                // CVTTSD2SI returns the integer-indefinite value for NaN/out-of-range.
                 if (!std::isfinite(value) ||
-                    value < static_cast<double>(INT64_MIN) ||
-                    value > static_cast<double>(INT64_MAX))
-                    return 0;
-                const std::int64_t converted = static_cast<std::int64_t>(std::trunc(value));
-                return static_cast<int>(static_cast<std::uint32_t>(static_cast<std::uint64_t>(converted)));
+                    value < -2147483648.0 ||
+                    value >= 2147483648.0)
+                    return static_cast<int>(0x80000000u);
+                return static_cast<int>(value);
+#endif
             }
 
             std::int32_t imul32Low(std::int32_t a, std::int32_t b) noexcept
@@ -212,13 +206,6 @@ namespace as1
                 0x3F6C835Eu, 0x3F6ED89Eu, 0x3F710908u, 0x3F731447u, 0x3F74FA0Bu, 0x3F76BA07u, 0x3F7853F8u, 0x3F79C79Du,
                 0x3F7B14BEu, 0x3F7C3B28u, 0x3F7D3AACu, 0x3F7E1324u, 0x3F7EC46Du, 0x3F7F4E6Du, 0x3F7FB10Fu, 0x3F7FEC43u,
             };
-
-            float weakControllerFloatFromBits(std::uint32_t bits) noexcept
-            {
-                float value = 0.0f;
-                std::memcpy(&value, &bits, sizeof(value));
-                return value;
-            }
 
             std::int32_t signedDiv2TowardZero(std::int32_t value) noexcept
             {
@@ -332,24 +319,25 @@ namespace as1
 
             const std::int32_t xNumerator = sub32Wrap(imul32Low(aLine1, dx34), imul32Low(dx12, aLine2));
 
-            int ix = 0;
-            int iy = 0;
-            const long double intersectionX = static_cast<long double>(xNumerator) / static_cast<long double>(denominator);
-            long double intersectionY = 0.0L;
+            // sub_4548A0 converts the wrapped 32-bit numerators to binary64,
+            // divides with DIVSD, then truncates with CVTTSD2SI.  Do not widen
+            // this path to x87/long double: the rounding point is observable.
+            const double intersectionX = static_cast<double>(xNumerator) / static_cast<double>(denominator);
+            double intersectionY = 0.0;
             if (dx12 != 0)
             {
-                intersectionY = (static_cast<long double>(aLine1) -
-                                 static_cast<long double>(dy12) * intersectionX) /
-                                static_cast<long double>(dx12);
+                intersectionY = (static_cast<double>(aLine1) -
+                                 static_cast<double>(dy12) * intersectionX) /
+                                static_cast<double>(dx12);
             }
             else if (dx34 != 0)
             {
-                intersectionY = (static_cast<long double>(aLine2) -
-                                 static_cast<long double>(dy34Reverse) * intersectionX) /
-                                static_cast<long double>(dx34);
+                intersectionY = (static_cast<double>(aLine2) -
+                                 static_cast<double>(dy34Reverse) * intersectionX) /
+                                static_cast<double>(dx34);
             }
-            ix = static_cast<int>(intersectionX);
-            iy = static_cast<int>(intersectionY);
+            const int ix = weakTruncateDoubleToInt32(intersectionX);
+            const int iy = weakTruncateDoubleToInt32(intersectionY);
 
             if (x1 >= x2)
             {
@@ -1541,9 +1529,11 @@ namespace as1
         WeakController* createOrRetainNode(WeakControllerMap* self, float x, float y, float id)
         {
 
-            const int ix = weakConvertFloatToInt32(x);
-            const int iy = weakConvertFloatToInt32(y);
-            const int iid = weakConvertFloatToInt32(id);
+            // sub_454790 uses CVTTSS2SI directly for all three script/resource
+            // coordinates before the near-node lookup.
+            const int ix = weakTruncateFloatToInt32(x);
+            const int iy = weakTruncateFloatToInt32(y);
+            const int iid = weakTruncateFloatToInt32(id);
 
             if (WeakController* existing = findNodeNearCoordinates(self, ix, iy, iid))
             {

@@ -7,7 +7,7 @@ namespace as1
     namespace
     {
 
-        std::array<std::uint32_t, 256> kCrc32Table = {{
+        std::array<std::uint32_t, 256> kCrc3232Table = {{
             0x00000000u, 0x77073096u, 0xEE0E612Cu, 0x990951BAu,
             0x076DC419u, 0x706AF48Fu, 0xE963A535u, 0x9E6495A3u,
             0x0EDB8832u, 0x79DCB8A4u, 0xE0D5E91Eu, 0x97D2D988u,
@@ -75,7 +75,7 @@ namespace as1
         }};
     }
 
-    std::uint32_t updateCrc32Bytes(std::uint32_t& crc, const void* data, int size)
+    std::uint32_t updateCrc3232Bytes(std::uint32_t& crc, const void* data, int size)
     {
         const auto* cursor = static_cast<const std::uint8_t*>(data);
         if (!cursor)
@@ -91,7 +91,7 @@ namespace as1
         {
             const std::uint8_t value = *reinterpret_cast<const std::uint8_t*>(static_cast<std::uintptr_t>(current));
             const std::uint8_t index = static_cast<std::uint8_t>(value ^ static_cast<std::uint8_t>(crc));
-            crc = (crc >> 8) ^ kCrc32Table[index];
+            crc = (crc >> 8) ^ kCrc3232Table[index];
             ++current;
         }
 #else
@@ -101,7 +101,7 @@ namespace as1
             while (cursor < end)
             {
                 const std::uint8_t index = static_cast<std::uint8_t>(*cursor ^ static_cast<std::uint8_t>(crc));
-                crc = (crc >> 8) ^ kCrc32Table[index];
+                crc = (crc >> 8) ^ kCrc3232Table[index];
                 ++cursor;
             }
         }
@@ -109,39 +109,39 @@ namespace as1
         return crc;
     }
 
-    std::uint32_t UpdateCrc32(std::uint32_t& crc, const void* data, unsigned int size)
+    std::uint32_t UpdateCrc3232(std::uint32_t& crc, const void* data, unsigned int size)
     {
-        return updateCrc32Bytes(crc, data, static_cast<int>(size));
+        return updateCrc3232Bytes(crc, data, static_cast<int>(size));
     }
 
-    Crc32::Crc32(const void* data, unsigned int size)
+    Crc3232::Crc3232(const void* data, unsigned int size)
     {
         Update(data, size);
     }
 
-    std::uint32_t Crc32::Update(const void* data, unsigned int size)
+    std::uint32_t Crc3232::Update(const void* data, unsigned int size)
     {
-        return UpdateCrc32(m_crc, data, size);
+        return UpdateCrc3232(m_crc, data, size);
     }
 
-    void Crc32::Reset()
+    void Crc3232::Reset()
     {
         m_crc = 0;
     }
 
-    std::uint32_t Crc32::Value() const
+    std::uint32_t Crc3232::Value() const
     {
         return m_crc;
     }
 
-    Crc32::operator unsigned int() const
+    Crc3232::operator unsigned int() const
     {
         return m_crc;
     }
 
-    std::uint32_t Crc32::UpdateValue(std::uint32_t crc, const void* data, unsigned int size)
+    std::uint32_t Crc3232::UpdateValue(std::uint32_t crc, const void* data, unsigned int size)
     {
-        UpdateCrc32(crc, data, size);
+        UpdateCrc3232(crc, data, size);
         return crc;
     }
 }

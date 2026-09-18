@@ -64,36 +64,54 @@ namespace as1
                 : static_cast<std::uint32_t>(product);
         }
 
+        int surfaceCvttss2si(float value) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            // CVTTSS2SI returns integer-indefinite (0x80000000) for NaN/overflow.
+            if (!(value >= -2147483648.0f && value < 2147483648.0f))
+                return std::numeric_limits<std::int32_t>::min();
+            return static_cast<int>(value);
+#endif
+        }
+
+        int surfaceCurveOffset(int baseOffset, int segment, int lane) noexcept
+        {
+            // Retail addressing is [weapon + segment*4 + base].  On x86 the
+            // scale/addition naturally wraps at 32 bits; make that explicit so
+            // CVTTSS2SI's 0x80000000 result does not trigger signed-overflow UB.
+            const std::uint32_t scaled = static_cast<std::uint32_t>(segment) * 4u;
+            const std::uint32_t offset = static_cast<std::uint32_t>(baseOffset) +
+                                         scaled + static_cast<std::uint32_t>(lane * 4);
+            return static_cast<std::int32_t>(offset);
+        }
+
         float interpolateSurfaceEffectCurve(const VID_SURFACE* owner,
                                             float position,
                                             int baseOffset) noexcept
         {
-            int segment = 0;
-            if (!std::isfinite(position) ||
-                position < static_cast<float>(std::numeric_limits<std::int32_t>::min()) ||
-                position >= 2147483648.0f)
-            {
-                segment = std::numeric_limits<std::int32_t>::min();
-            }
-            else
-            {
-                segment = static_cast<int>(std::trunc(position));
-            }
+            const int segment = surfaceCvttss2si(position);
             if (segment >= 7)
                 return owner->weaponFloatAt(baseOffset + 7 * 4);
 
-            const float first = owner->weaponFloatAt(baseOffset + segment * 4);
-            const float second = owner->weaponFloatAt(baseOffset + (segment + 1) * 4);
-            return (second - first) * (position - static_cast<float>(segment)) + first;
+            const float first = owner->weaponFloatAt(surfaceCurveOffset(baseOffset, segment, 0));
+            const float second = owner->weaponFloatAt(surfaceCurveOffset(baseOffset, segment, 1));
+#if defined(_MSC_VER) && defined(_M_IX86)
+            __m128 delta = _mm_sub_ss(_mm_set_ss(second), _mm_set_ss(first));
+            __m128 segmentF = _mm_cvtsi32_ss(_mm_setzero_ps(), segment);
+            __m128 fraction = _mm_sub_ss(_mm_set_ss(position), segmentF);
+            return _mm_cvtss_f32(_mm_add_ss(_mm_mul_ss(delta, fraction), _mm_set_ss(first)));
+#else
+            const float delta = second - first;
+            const float fraction = position - static_cast<float>(segment);
+            return delta * fraction + first;
+#endif
         }
 
         int truncateSurfaceFloatToInt32(float value) noexcept
         {
-            if (!std::isfinite(value) ||
-                value < static_cast<float>(std::numeric_limits<std::int32_t>::min()) ||
-                value >= 2147483648.0f)
-                return std::numeric_limits<std::int32_t>::min();
-            return static_cast<int>(std::trunc(value));
+            return surfaceCvttss2si(value);
         }
 
         float multiplySurfaceFloat(float lhs, float rhs) noexcept

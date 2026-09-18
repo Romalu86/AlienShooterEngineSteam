@@ -79,9 +79,6 @@ namespace as1
 
         enum class InternalActionCode : std::uint32_t
         {
-            RandomItemBySpriteType = 59u,
-            CopyCommandPrefixToSprite = 75u,
-            GetCommandStackCount = 76u,
             SetAnimationAndDirection = 201u,
             GetAnimation = 202u,
             ChangeCoordinateXY = 203u,
@@ -333,13 +330,26 @@ namespace as1
             return static_cast<std::int32_t>(static_cast<std::uint32_t>(a) - static_cast<std::uint32_t>(b));
         }
 
-        int spriteConvertFloatToInt32(long double value) noexcept;
-
-        float spriteFildMulF32(std::int32_t value, float scale) noexcept
+        int spriteCvttss2si(float value) noexcept
         {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            // CVTTSS2SI returns the integer-indefinite value for NaN/overflow.
+            if (!(value >= -2147483648.0f && value < 2147483648.0f))
+                return std::numeric_limits<std::int32_t>::min();
+            return static_cast<int>(value);
+#endif
+        }
 
-            return static_cast<float>(
-                static_cast<long double>(value) * static_cast<long double>(scale));
+        int spriteWeaponCurveOffset(int baseOffset, int segment, int lane) noexcept
+        {
+            // Retail uses [weapon + segment*4 + base] with 32-bit x86 address
+            // arithmetic.  Preserve wrap for CVTTSS2SI integer-indefinite.
+            const std::uint32_t scaled = static_cast<std::uint32_t>(segment) * 4u;
+            const std::uint32_t offset = static_cast<std::uint32_t>(baseOffset) +
+                                         scaled + static_cast<std::uint32_t>(lane * 4);
+            return static_cast<std::int32_t>(offset);
         }
 
         float spriteFildToF32(std::int32_t value) noexcept
@@ -349,15 +359,28 @@ namespace as1
 
         float spriteFildAddF32(std::int32_t value, float addend) noexcept
         {
-            return static_cast<float>(
-                static_cast<long double>(value) + static_cast<long double>(addend));
+            // CVTDQ2PS -> ADDSS.  The integer-to-float rounding happens before
+            // the addition; using the exact integer in extended precision is not
+            // equivalent for coordinates outside the exact binary32 integer range.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            __m128 base = _mm_cvtsi32_ss(_mm_setzero_ps(), value);
+            return _mm_cvtss_f32(_mm_add_ss(base, _mm_set_ss(addend)));
+#else
+            const float base = static_cast<float>(value);
+            return base + addend;
+#endif
         }
 
         float spriteFildSubF32(std::int32_t value, float subtrahend) noexcept
         {
-
-            return static_cast<float>(
-                static_cast<long double>(value) - static_cast<long double>(subtrahend));
+            // CVTDQ2PS -> SUBSS, as used by private class-7 ACT_COOR_ATTACK.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            __m128 base = _mm_cvtsi32_ss(_mm_setzero_ps(), value);
+            return _mm_cvtss_f32(_mm_sub_ss(base, _mm_set_ss(subtrahend)));
+#else
+            const float base = static_cast<float>(value);
+            return base - subtrahend;
+#endif
         }
 
         float addThenSubtractF32(float base, float addend, float subtractend) noexcept
@@ -387,11 +410,28 @@ namespace as1
         int spriteAddRoundedFloatAndConvertToInt32(float value, float addend,
                                           float& storedValue) noexcept
         {
-
-            const long double extended =
-                static_cast<long double>(value) + static_cast<long double>(addend);
-            storedValue = static_cast<float>(extended);
-            return spriteConvertFloatToInt32(extended);
+            // Steam 1.22 SPRITE::Action case 37 (0x469A32..0x469A59):
+            // the ground-height result is returned through x87, FADDs a float
+            // constant, then FSTP rounds that sum to binary32 before CVTTSS2SI.
+            // Converting the pre-rounded extended sum directly to
+            // integer, which can differ at an integer boundary.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            float result = value;
+            __asm
+            {
+                fld result
+                fadd addend
+                fstp result
+            }
+            storedValue = result;
+#else
+            // Both inputs are binary32.  A double intermediate is sufficient for
+            // the normal map-height range; the required architectural rounding
+            // point is the store back to float before conversion.
+            storedValue = static_cast<float>(
+                static_cast<double>(value) + static_cast<double>(addend));
+#endif
+            return spriteCvttss2si(storedValue);
         }
 
         bool spriteFcompC3(float lhs, float rhs) noexcept
@@ -399,48 +439,24 @@ namespace as1
             return lhs == rhs;
         }
 
-        int spriteConvertFloatToInt32(long double value) noexcept
-        {
-
-            if (!std::isfinite(value) ||
-                value < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                value > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            return static_cast<int>(static_cast<std::uint32_t>(
-                static_cast<std::uint64_t>(static_cast<std::int64_t>(std::trunc(value)))));
-        }
-
-        int spriteSubtractAndConvertToInt32(float lhs, float rhs) noexcept
-        {
-
-            return spriteConvertFloatToInt32(static_cast<long double>(lhs) -
-                                   static_cast<long double>(rhs));
-        }
-
-        int spriteSubtractRoundedFloatAndConvertToInt32(float lhs, float rhs) noexcept
-        {
-            const float rounded = static_cast<float>(
-                static_cast<long double>(lhs) - static_cast<long double>(rhs));
-            return spriteConvertFloatToInt32(static_cast<long double>(rounded));
-        }
-
         int spriteMultiplyAndConvertToInt32(float value, float multiplier) noexcept
         {
-            return spriteConvertFloatToInt32(static_cast<long double>(value) *
-                                   static_cast<long double>(multiplier));
+            // MULSS -> CVTTSS2SI in the retail debug paths.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            const __m128 scaled = _mm_mul_ss(_mm_set_ss(value), _mm_set_ss(multiplier));
+            return _mm_cvtt_ss2si(scaled);
+#else
+            const float scaled = value * multiplier;
+            return spriteCvttss2si(scaled);
+#endif
         }
 
         int spriteDivideMultiplyAndConvertToInt32(float numerator, float denominator, float multiplier) noexcept
         {
-            return spriteConvertFloatToInt32(static_cast<long double>(numerator) /
-                                   static_cast<long double>(denominator) *
-                                   static_cast<long double>(multiplier));
-        }
-
-        float spriteFildMulStoreFloat(int value, float multiplier) noexcept
-        {
-            return static_cast<float>(static_cast<long double>(value) *
-                                      static_cast<long double>(multiplier));
+            // Retail sequence: DIVSS -> MULSS -> CVTTSS2SI.
+            const float divided = numerator / denominator;
+            const float scaled = divided * multiplier;
+            return spriteCvttss2si(scaled);
         }
 
         int pathScaledProgressQuotient(int progress, int delta, int duration) noexcept
@@ -454,41 +470,41 @@ namespace as1
 
         float pathInterpolateCoordinate(int quotient, int base) noexcept
         {
-
-            return static_cast<float>(
-                static_cast<long double>(quotient) +
-                static_cast<long double>(base) * 256.0L);
+            // Steam 1.22: CVTDQ2PS(base), MULSS 256.0f, CVTDQ2PS(quotient), ADDSS.
+            const float scaledBase = static_cast<float>(base) * 256.0f;
+            return static_cast<float>(quotient) + scaledBase;
         }
 
         float pathAverageCoordinate(float lhs, float rhs) noexcept
         {
-
-            return static_cast<float>(
-                (static_cast<long double>(lhs) + static_cast<long double>(rhs)) *
-                0.001953125L);
+            // Steam 1.22: ADDSS followed by MULSS 1/512.
+            const float sum = lhs + rhs;
+            return sum * 0.001953125f;
         }
 
-        int pathDirectionDeltaXToInt(float lhs, float rhs) noexcept
+        float pathDirectionDeltaX(float lhs, float rhs) noexcept
         {
-
-            return spriteConvertFloatToInt32(
-                (static_cast<long double>(lhs) - static_cast<long double>(rhs) + 128.0L) *
-                0.00390625L);
+            // Steam 1.22: SUBSS, ADDSS 128.0f, MULSS 1/256.
+            const float delta = lhs - rhs;
+            const float biased = delta + 128.0f;
+            return biased * 0.00390625f;
         }
 
-        int pathDirectionDeltaYToInt(float lhs, float rhs) noexcept
+        float pathDirectionDeltaY(float lhs, float rhs) noexcept
         {
-
-            return spriteConvertFloatToInt32(
-                (static_cast<long double>(lhs) - static_cast<long double>(rhs) + 128.0L) *
-                3.0L * 0.001953125L);
+            // Steam 1.22 keeps two distinct MULSS rounding points: *3 then *1/512.
+            const float delta = lhs - rhs;
+            const float biased = delta + 128.0f;
+            const float tripled = biased * 3.0f;
+            return tripled * 0.001953125f;
         }
 
         int animationDelayFromSpeed(float speed) noexcept
         {
 
+            const float scaledSpeed = speed * 1000.0f;
             const std::uint32_t scaled = static_cast<std::uint32_t>(
-                spriteMultiplyAndConvertToInt32(speed, 1000.0f));
+                spriteCvttss2si(scaledSpeed));
             const std::uint32_t sign = 0u - (scaled >> 31);
             const std::uint32_t magnitude = (scaled ^ sign) - sign;
             const std::uint32_t plusTen = magnitude + 10u;
@@ -500,35 +516,40 @@ namespace as1
 
         bool spriteFildIntLessEqualOrUnordered(std::int32_t lhs, float rhs) noexcept
         {
-
-            return std::isnan(rhs) ||
-                   static_cast<long double>(lhs) <= static_cast<long double>(rhs);
+            // Steam 1.22 path code uses CVTDQ2PS -> COMISS -> JBE.
+            // JBE is taken for ordered <= and for unordered (NaN), so retain
+            // the binary32 integer conversion and express the branch as !>.
+            const float lhsFloat = static_cast<float>(lhs);
+            return !(lhsFloat > rhs);
         }
 
         void computeCollisionKinematics(float thisSpeedRaw, float targetSpeedRaw,
                                               float thisWeight, float targetWeight, int mode,
                                               float& sharedSpeedOut, float& relativeSpeedOut) noexcept
         {
-            // resolveEngineChainCollision keeps the weighted-speed division live in extended precision extended
-            // precision for the lower clamp comparison, stores a binary32 copy,
-            // and computes relative speed from the two fabs values that remain
-            // on the extended precision stack. Preserve both observable rounding boundaries.
-            const long double thisSpeed = std::fabs(static_cast<long double>(thisSpeedRaw));
-            const long double targetSpeed = std::fabs(static_cast<long double>(targetSpeedRaw));
-            const long double numerator =
-                static_cast<long double>(targetWeight) * targetSpeed +
-                static_cast<long double>(thisWeight) * thisSpeed;
-            const long double denominator =
-                static_cast<long double>(targetWeight) + static_cast<long double>(thisWeight);
-            const long double sharedExtended = numerator / denominator;
-            sharedSpeedOut = static_cast<float>(sharedExtended);
-            if (!std::isnan(sharedExtended) && sharedExtended > 0.001L &&
-                (sharedSpeedOut < 0.01f || std::isnan(sharedSpeedOut)))
-                sharedSpeedOut = 0.01f;
-            const long double relative = (mode == 2 || mode == 3)
-                ? std::fabs(thisSpeed - targetSpeed)
-                : targetSpeed + thisSpeed;
-            relativeSpeedOut = static_cast<float>(relative);
+            // Steam 1.22 0x421068..0x42110E.  The original converts each speed
+            // to double only to clear its sign bit, then immediately converts it
+            // back to binary32.  All weighting/division afterwards is MULSS,
+            // ADDSS and DIVSS -- there is no x87/extended-precision accumulator.
+            const float thisSpeed = std::fabs(thisSpeedRaw);
+            const float targetSpeed = std::fabs(targetSpeedRaw);
+
+            const float targetContribution = targetWeight * targetSpeed;
+            const float thisContribution = thisWeight * thisSpeed;
+            const float numerator = targetContribution + thisContribution;
+            const float denominator = targetWeight + thisWeight;
+            float shared = numerator / denominator;
+
+            // COMISS shared,0.001 / JBE skips both <= and unordered.  MAXSS
+            // then clamps an ordered value to at least 0.01f.
+            if (shared > 0.001f && shared < 0.01f)
+                shared = 0.01f;
+            sharedSpeedOut = shared;
+
+            if (mode == 2 || mode == 3)
+                relativeSpeedOut = std::fabs(thisSpeed - targetSpeed);
+            else
+                relativeSpeedOut = targetSpeed + thisSpeed;
         }
 
         bool projectVerticalMotionDirection(int direction, float speed, float zSpeed,
@@ -560,12 +581,6 @@ namespace as1
 
             // floating-point comparison next, previous + ordered greater-than test: ties and unordered choose next.
             return lastMetric > firstMetric;
-        }
-
-        bool x87IsZeroOrUnordered(float value) noexcept
-        {
-
-            return value == 0.0f || std::isnan(value);
         }
 
         bool engineCommandReferenceBlockedRetail(const SPRITE* sprite) noexcept
@@ -603,46 +618,73 @@ namespace as1
             return lhs > rhs;
         }
 
-        bool x87AbsDiffGreaterOrdered(float lhs, float rhs, float limit) noexcept
+        bool f32AbsDiffGreaterOrdered(float lhs, float rhs, float limit) noexcept
         {
+            // Steam 1.22 sub_423500: SUBSS -> CVTPS2PD/sign-mask/CVTPD2PS ->
+            // COMISS diff,limit / JBE.  The subtraction is rounded to binary32
+            // before the absolute-value step; unordered and <= are rejected.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            const __m128 delta = _mm_sub_ss(_mm_set_ss(lhs), _mm_set_ss(rhs));
+            const float diff = std::fabs(_mm_cvtss_f32(delta));
+#else
+            const float delta = lhs - rhs;
+            const float diff = std::fabs(delta);
+#endif
+            return diff > limit;
+        }
 
-            const long double diff = std::fabs(
-                static_cast<long double>(lhs) - static_cast<long double>(rhs));
-            const long double bound = static_cast<long double>(limit);
-            return !std::isnan(diff) && !std::isnan(bound) && diff > bound;
+        float engineRangeMetricF32(float deltaX, float deltaY) noexcept
+        {
+            // Steam 1.22 sub_424CE0 keeps this route in binary32 after the
+            // SUBSS deltas.  Each absolute value is produced by float->double,
+            // sign-mask, double->float, then the weighted metric is MULSS+ADDSS.
+            // COMISS/JBE selects the X*0.5+Y arm for <= and unordered.
+            const float ax = std::fabs(deltaX);
+            const float ay = std::fabs(deltaY);
+#if defined(_MSC_VER) && defined(_M_IX86)
+            __m128 x = _mm_set_ss(ax);
+            __m128 y = _mm_set_ss(ay);
+            if (!(ax > ay))
+                return _mm_cvtss_f32(_mm_add_ss(y, _mm_mul_ss(x, _mm_set_ss(0.5f))));
+            return _mm_cvtss_f32(_mm_add_ss(x, _mm_mul_ss(y, _mm_set_ss(0.5f))));
+#else
+            if (!(ax > ay))
+            {
+                const float halfX = ax * 0.5f;
+                return ay + halfX;
+            }
+            const float halfY = ay * 0.5f;
+            return ax + halfY;
+#endif
         }
 
         bool metricWithinFromRoundedDeltas(float deltaX, float deltaY, float radius) noexcept
         {
-            // Initial linked-child route in evaluateEngineTargetRangeState stores X/Y deltas to
-            // binary32 stack locals, calls approximatePlanarDistance, then compares the live
-            // extended precision metric with (radius-10) using comparison status test. Recreate that
-            // exact numeric route without a premature metric spill.
-            const long double ax = std::fabs(static_cast<long double>(deltaX));
-            const long double ay = std::fabs(static_cast<long double>(deltaY));
-            const long double metric =
-                (ax <= ay || std::isnan(ax) || std::isnan(ay))
-                    ? ax * 0.5L + ay
-                    : ax + ay * 0.5L;
-            const long double limit = static_cast<long double>(radius) - 10.0L;
-            return metric <= limit || std::isnan(metric) || std::isnan(limit);
+            const float metric = engineRangeMetricF32(deltaX, deltaY);
+#if defined(_MSC_VER) && defined(_M_IX86)
+            const float limit = _mm_cvtss_f32(
+                _mm_sub_ss(_mm_set_ss(radius), _mm_set_ss(10.0f)));
+#else
+            const float limit = radius - 10.0f;
+#endif
+            // COMISS metric,limit / SETBE: true for ordered <= and unordered.
+            return !(metric > limit);
         }
 
         bool metricWithinPositions(float ownerX, float ownerY,
                                              float targetX, float targetY,
                                              float radius) noexcept
         {
-
-            const long double ax = std::fabs(
-                static_cast<long double>(ownerX) - static_cast<long double>(targetX));
-            const long double ay = std::fabs(
-                static_cast<long double>(ownerY) - static_cast<long double>(targetY));
-            const long double metric =
-                (ax <= ay || std::isnan(ax) || std::isnan(ay))
-                    ? ax * 0.5L + ay
-                    : ax + ay * 0.5L;
-            const long double limit = static_cast<long double>(radius) - 10.0L;
-            return metric <= limit || std::isnan(metric) || std::isnan(limit);
+#if defined(_MSC_VER) && defined(_M_IX86)
+            const float deltaX = _mm_cvtss_f32(
+                _mm_sub_ss(_mm_set_ss(ownerX), _mm_set_ss(targetX)));
+            const float deltaY = _mm_cvtss_f32(
+                _mm_sub_ss(_mm_set_ss(ownerY), _mm_set_ss(targetY)));
+#else
+            const float deltaX = ownerX - targetX;
+            const float deltaY = ownerY - targetY;
+#endif
+            return metricWithinFromRoundedDeltas(deltaX, deltaY, radius);
         }
 
         bool spriteBitsEqual(float value, std::uint32_t bits) noexcept
@@ -840,25 +882,12 @@ namespace as1
         {
             const float dx = targetX - sourceX;
             const float dy = targetY - sourceY;
-            // The game logic uses single-precision subtraction followed by truncating float-to-int conversion.
-            const int x = static_cast<int>(dx);
-            const int y = static_cast<int>(dy);
+            // Retail performs SUBSS followed by CVTTSS2SI for both deltas.
+            // Preserve integer-indefinite on unordered/out-of-range input.
+            const int x = spriteCvttss2si(dx);
+            const int y = spriteCvttss2si(dy);
             int projectedLength = 0;
             return AngleFromXY(x, y, &projectedLength).Int();
-        }
-
-        float targetDistanceMetric(float targetX, float targetY,
-                                 float sourceX, float sourceY) noexcept
-        {
-            const long double dx = std::fabs(
-                static_cast<long double>(targetX) - static_cast<long double>(sourceX));
-            const long double dy = std::fabs(
-                static_cast<long double>(targetY) - static_cast<long double>(sourceY));
-            const long double metric =
-                (dx <= dy || std::isnan(dx) || std::isnan(dy))
-                    ? dx * 0.5L + dy
-                    : dx + dy * 0.5L;
-            return static_cast<float>(metric);
         }
 
         std::int32_t spriteNeg32Wrap(std::int32_t value) noexcept
@@ -872,25 +901,6 @@ namespace as1
             return static_cast<std::int32_t>(
                 (static_cast<std::uint32_t>(value) ^ static_cast<std::uint32_t>(sign)) -
                 static_cast<std::uint32_t>(sign));
-        }
-
-        bool x87SumGreaterThanAbsDiffOrdered(float boundA, float boundB,
-                                             float lhs, float rhs) noexcept
-        {
-            const long double diff = std::fabs(
-                static_cast<long double>(lhs) - static_cast<long double>(rhs));
-            const long double bound =
-                static_cast<long double>(boundA) + static_cast<long double>(boundB);
-            return !std::isnan(diff) && !std::isnan(bound) && bound > diff;
-        }
-
-        bool x87SumLessOrUnordered(float lhsA, float lhsB, float rhs) noexcept
-        {
-
-            const long double sum =
-                static_cast<long double>(lhsA) + static_cast<long double>(lhsB);
-            const long double right = static_cast<long double>(rhs);
-            return sum < right || std::isnan(sum) || std::isnan(right);
         }
 
         bool f32SumGreaterThanAbsDiffOrdered(float boundA, float boundB,
@@ -914,13 +924,8 @@ namespace as1
 
         int spriteTruncateFloatToInt32(float value) noexcept
         {
-            // truncating float-to-int conversion returns INT_MIN for NaN and out-of-range input.
-            if (!std::isfinite(value) ||
-                value < -2147483648.0f || value >= 2147483648.0f)
-            {
-                return std::numeric_limits<std::int32_t>::min();
-            }
-            return static_cast<std::int32_t>(value);
+            // Audited callers map to direct CVTTSS2SI sites in the Steam image.
+            return spriteCvttss2si(value);
         }
 
         bool shouldSuppressFlagmanCommand(std::int32_t x, std::int32_t y,
@@ -928,16 +933,21 @@ namespace as1
                                                 float controlledX,
                                                 float controlledY) noexcept
         {
-            const long double dx = std::fabs(
-                static_cast<long double>(x) - static_cast<long double>(controlledX));
-            const long double dy = std::fabs(
-                static_cast<long double>(y) - static_cast<long double>(controlledY));
-            const long double metric =
-                (dx <= dy || std::isnan(dx) || std::isnan(dy))
-                    ? dx * 0.5L + dy
-                    : dx + dy * 0.5L;
-            const long double threshold = static_cast<long double>(range);
-            return metric < threshold || std::isnan(metric) || std::isnan(threshold);
+            // SPRITE::Action case 43 calls sub_43E200.  That routine performs
+            // SUBSS/fabs/MULSS/ADDSS and returns a binary32 value through x87;
+            // the caller immediately FSTPs it and compares it with CVTDQ2PS(range)
+            // using COMISS/JB.  Keep every arithmetic rounding point in float.
+            const float fx = static_cast<float>(x);
+            const float fy = static_cast<float>(y);
+            const float dx = std::fabs(fx - controlledX);
+            const float dy = std::fabs(fy - controlledY);
+            const float metric = !(dx > dy)
+                ? dx * 0.5f + dy
+                : dy * 0.5f + dx;
+            const float threshold = static_cast<float>(range);
+
+            // COMISS metric,threshold + JB is taken for ordered '<' and unordered.
+            return !(metric >= threshold);
         }
 
         bool computeFalloffDamage(float sourceX, float sourceY,
@@ -4076,16 +4086,6 @@ namespace as1
         return value;
     }
 
-    namespace
-    {
-        float addIntegerToFloatRounded(float base, int addend) noexcept
-        {
-
-            return static_cast<float>(static_cast<long double>(base) +
-                                      static_cast<long double>(addend));
-        }
-    }
-
     int SPRITE::dispatchExtendedSpriteActionOpcode(int opcode, int argument1, int argument2, int argument3) noexcept
     {
         if (opcode == static_cast<int>(ActionCode::ACT_REPAIR))
@@ -4191,14 +4191,19 @@ namespace as1
                 screenY >= static_cast<float>(graph->getViewportTop()) &&
                 screenY < static_cast<float>(graph->getViewportBottom()))
             {
-                const int pixelX = spriteConvertFloatToInt32(static_cast<long double>(screenX));
-                const int pixelY = spriteConvertFloatToInt32(static_cast<long double>(screenY));
+                // Steam 1.22 class-7 Action 0x4344FB/0x434506: direct
+                // CVTTSS2SI of the camera-relative screen coordinates.
+                const int pixelX = spriteCvttss2si(screenX);
+                const int pixelY = spriteCvttss2si(screenY);
                 const std::uint16_t* const depth = graph->softwareDepthBuffer();
                 const int pitch = graph->softwareDepthPitch();
                 const int pixelIndex = spriteAdd32Wrap(pixelX, spriteImul32Low(pitch, pixelY));
                 height = static_cast<float>(depth[pixelIndex] >> 3) - 128.0f;
-                if (height > 70.0f)
-                    height = 50.0f;
+                // Retail compares the sampled world Z against this sprite's
+                // current Z + 70 and clamps to current Z + 50.
+                const float maxSampleZ = Z() + 70.0f;
+                if (height > maxSampleZ)
+                    height = Z() + 50.0f;
             }
             else
             {
@@ -4228,26 +4233,6 @@ namespace as1
             return 0;
         }
 
-        case static_cast<int>(ActionCode::ACT_PATH_BLOCK):
-        {
-            const float candidateZ = spriteFildAddF32(argument3, Z());
-            const float candidateX = spriteFildAddF32(argument1, X());
-            if (CanPlaceWithCrush(candidateX, Y(), candidateZ) == nullptr)
-            {
-                ChangeCoor(candidateX, Y(), candidateZ);
-                return 0;
-            }
-
-            const float candidateY = spriteFildAddF32(argument2, Y());
-            if (CanPlaceWithCrush(X(), candidateY, candidateZ) != nullptr)
-            {
-                setSpeedDirect(0.0f);
-                return 0;
-            }
-            ChangeCoor(X(), candidateY, candidateZ);
-            return 0;
-        }
-
         case static_cast<int>(ActionCode::ACT_NEXT_COMMAND):
         {
             if (currentAnimation() >= 15)
@@ -4264,7 +4249,7 @@ namespace as1
                 setAttackDecisionCode(computeAttackDecisionCode(delta));
             }
 
-            ChangeAnimation(x87IsZeroOrUnordered(Speed()) ? 0 : 2);
+            ChangeAnimation(Speed() == 0.0f ? 0 : 2);
             return 0;
         }
 
@@ -5458,19 +5443,28 @@ namespace as1
             return;
 
         const float position = m_actionAuxState->effectCurvePosition;
-        const int segment = static_cast<int>(position); // truncating float-to-int conversion: trunc toward zero.
+        const int segment = spriteCvttss2si(position);
 
         const auto curveValue = [this, position, segment](int baseOffset) noexcept -> int
         {
             if (segment >= 7)
                 return m_vid->weaponIntAt(baseOffset + 7 * 4);
 
-            const int first = m_vid->weaponIntAt(baseOffset + segment * 4);
-            const int second = m_vid->weaponIntAt(baseOffset + (segment + 1) * 4);
-            const float interpolated =
-                static_cast<float>(second - first) * (position - static_cast<float>(segment)) +
-                static_cast<float>(first);
-            return static_cast<int>(interpolated); // truncating float-to-int conversion.
+            const int first = m_vid->weaponIntAt(spriteWeaponCurveOffset(baseOffset, segment, 0));
+            const int second = m_vid->weaponIntAt(spriteWeaponCurveOffset(baseOffset, segment, 1));
+            const int difference = spriteSub32Wrap(second, first);
+#if defined(_MSC_VER) && defined(_M_IX86)
+            __m128 delta = _mm_cvtsi32_ss(_mm_setzero_ps(), difference);
+            __m128 segmentF = _mm_cvtsi32_ss(_mm_setzero_ps(), segment);
+            __m128 fraction = _mm_sub_ss(_mm_set_ss(position), segmentF);
+            __m128 firstF = _mm_cvtsi32_ss(_mm_setzero_ps(), first);
+            return _mm_cvtt_ss2si(_mm_add_ss(_mm_mul_ss(delta, fraction), firstF));
+#else
+            const float delta = static_cast<float>(difference);
+            const float fraction = position - static_cast<float>(segment);
+            const float interpolated = delta * fraction + static_cast<float>(first);
+            return spriteCvttss2si(interpolated);
+#endif
         };
 
         const int blue = curveValue(0x0A4);
@@ -5539,15 +5533,18 @@ namespace as1
                 const float durationF = static_cast<float>(duration);
                 while (segment < 7)
                 {
-                    const float threshold = m_vid->weaponFloatAt(0x44 + segment * 4);
+                    const float threshold = m_vid->weaponFloatAt(
+                        spriteWeaponCurveOffset(0x44, segment, 0));
                     if (threshold * durationF > elapsedF)
                         break;
                     ++segment;
                 }
 
                 const int previousSegment = segment - 1;
-                const float previousPoint = m_vid->weaponFloatAt(0x44 + previousSegment * 4);
-                const float nextPoint = m_vid->weaponFloatAt(0x44 + segment * 4);
+                const float previousPoint = m_vid->weaponFloatAt(
+                    spriteWeaponCurveOffset(0x44, previousSegment, 0));
+                const float nextPoint = m_vid->weaponFloatAt(
+                    spriteWeaponCurveOffset(0x44, segment, 0));
                 aux->effectCurvePosition =
                     ((elapsedF - previousPoint * durationF) /
                      ((nextPoint - previousPoint) * durationF)) +
@@ -5873,12 +5870,24 @@ namespace as1
     {
     }
 
+    void PRIMITIVE::primitiveVtableSlot20()
+    {
+        // Steam 1.22 sub_43A490.
+        m_vid->Draw(this);
+    }
+
+    void PRIMITIVE::primitiveVtableSlot24(int value)
+    {
+        // Steam 1.22 sub_4387C0 is exactly a one-argument no-op (ret 4).
+        (void)value;
+    }
+
     int SPRITE::advancePrimitiveFrame() noexcept
     {
         const std::uint32_t now = core::CurrentTimeMilliseconds();
         int result = static_cast<int>(now);
-        const std::uint32_t frameInterval =
-            static_cast<std::uint32_t>(m_vid->defaultFrameSpeed());
+        const std::uint32_t frameInterval = static_cast<std::uint32_t>(
+            m_vid->hostFrameSpeedStorage(m_currentAnimation));
 
         if (now - m_applicationBucketTime >= frameInterval)
         {
@@ -6250,14 +6259,13 @@ namespace as1
 
     void SPRITE::drawBaseDebugOverlay()
     {
+        // Steam 1.22 sub_46D2B0.  Keep the original diagnostic fields and
+        // command-list order; this function is also useful while validating
+        // runtime state, so extra fields would hide real mismatches.
         GRAPH* const graph = GRAPH::CurrentGraph();
 
         const float left = static_cast<float>(graph->getViewportLeft());
         float top = static_cast<float>(graph->getViewportTop());
-
-        int bestNvid = 0;
-        if (m_bestTargetSprite)
-            bestNvid = m_bestTargetSprite->Vid()->nvid();
 
         int goalNvid = 0;
         if (m_goalSprite)
@@ -6265,47 +6273,41 @@ namespace as1
 
         const int ammo = dispatchVirtualAction(ActionCode::ACT_GET_AMMO, 0, 0, 0);
         graph->DrawText(left + 30.0f, top,
-            "Ref=%-3i cmd=%1i ani=%-2i ammo=%-3i hp=%-3i AT=%i goal=%-3i best=%-3i spd=%-3i,%-3i timer=%i moveFin=%1u%1u",
+            "Ref=%-3i cmd=%1i ani=%-2i hp=%-3i AT=%i goal=%-3i spd=%-3i,%-3i timer=%i ammo=%i mvE=%1u%1u %i,%i,%i",
             listReferenceCount(),
             commandIndex(),
             m_currentAnimation,
-            ammo,
             m_animationFrameTime,
             m_attackDecisionCode,
             goalNvid,
-            bestNvid,
             spriteMultiplyAndConvertToInt32(m_speed, 1000.0f),
             spriteMultiplyAndConvertToInt32(m_zSpeed, 1000.0f),
             static_cast<int>(m_actionTimer),
+            ammo,
             static_cast<unsigned>((m_runtimeFlags & CrossedGoalXFlag) != 0u),
-            static_cast<unsigned>((m_runtimeFlags & CrossedGoalYFlag) != 0u));
+            static_cast<unsigned>((m_runtimeFlags & CrossedGoalYFlag) != 0u),
+            spriteCvttss2si(m_xyz.x),
+            spriteCvttss2si(m_xyz.y),
+            spriteCvttss2si(m_xyz.z));
 
         SPRITE* const child = m_childChain;
         if (child && child->Vid() == m_vid->linkedVid())
         {
             top += 12.0f;
-            int childBestNvid = 0;
-            if (child->m_bestTargetSprite)
-                childBestNvid = child->m_bestTargetSprite->Vid()->nvid();
             int childGoalNvid = 0;
             if (child->m_goalSprite)
                 childGoalNvid = child->m_goalSprite->Vid()->nvid();
             const int childAmmo = child->dispatchVirtualAction(ActionCode::ACT_GET_AMMO, 0, 0, 0);
             graph->DrawText(left + 30.0f, top,
-                "Ref=%-3i cmd=%1i ani=%-2i ammo=%-3i hp=%-3i AT=%i goal=%-3i best=%-3i spd=%-3i,%-3i timer=%i moveFin=%1u%1u",
+                "Ref=%-3i cmd=%1i ani=%-2i hp=%-3i AT=%i goal=%-3i timer=%i ammo=%i",
                 child->listReferenceCount(),
                 child->commandIndex(),
                 child->m_currentAnimation,
-                childAmmo,
                 child->m_animationFrameTime,
                 child->m_attackDecisionCode,
                 childGoalNvid,
-                childBestNvid,
-                spriteMultiplyAndConvertToInt32(child->m_speed, 1000.0f),
-                spriteMultiplyAndConvertToInt32(child->m_zSpeed, 1000.0f),
                 static_cast<int>(child->m_actionTimer),
-                static_cast<unsigned>((child->m_runtimeFlags & CrossedGoalXFlag) != 0u),
-                static_cast<unsigned>((child->m_runtimeFlags & CrossedGoalYFlag) != 0u));
+                childAmmo);
         }
 
         const std::uint32_t commandCount = m_commandStack.m_commandRecords.count;
@@ -6314,9 +6316,9 @@ namespace as1
             top += 12.0f;
             STRING commandText = STRING::Format("%i - ", static_cast<int>(commandCount));
             const auto* const records = m_commandStack.m_commandRecords.records;
-            for (std::uint32_t index = 0; index < commandCount; ++index)
+            for (std::uint32_t remaining = commandCount; remaining != 0u; --remaining)
             {
-                const std::uint32_t* const words = records[index].words;
+                const std::uint32_t* const words = records[remaining - 1u].words;
                 const STRING item = STRING::Format("%i(%i,%i,%i) ",
                     static_cast<int>(words[0]), static_cast<int>(words[1]),
                     static_cast<int>(words[2]), static_cast<int>(words[3]));
@@ -6756,7 +6758,8 @@ namespace as1
 
             const float value = valueOwner->weaponBattleRange();
 
-            return x87LessOrUnordered(value, 10000.0f) ? value : 10000.0f;
+            // MINSS value,10000: source (10000) wins for >= and unordered.
+            return value < 10000.0f ? value : 10000.0f;
         };
 
         float result = 10000.0f;
@@ -6774,10 +6777,10 @@ namespace as1
             }
         }
 
-        if (x87EqualOrUnordered(result, 10000.0f))
+        if (result == 10000.0f)
             result = 0.0f;
 
-        return spriteConvertFloatToInt32(static_cast<long double>(result));
+        return spriteCvttss2si(result);
     }
 
     int SPRITE::updateSecondaryPathPosition(core::PathPosition* pathPair) noexcept
@@ -6788,7 +6791,7 @@ namespace as1
         const int primaryProgress = primaryPathProgressRef();
         VID* const vid = Vid();
         const float radiusFloat = vid->weaponRadius();
-        const int radiusLimit = spriteConvertFloatToInt32(static_cast<long double>(radiusFloat));
+        const int radiusLimit = spriteCvttss2si(radiusFloat);
 
         auto edgeAt = [](PathNode* node, int index) noexcept -> PathEdge&
         {
@@ -7295,14 +7298,18 @@ namespace as1
         if (minBattleRange == 999999.0f)
             minBattleRange = 0.0f;
 
-        const double denominator = static_cast<double>(weapon10Sum) -
-                                   static_cast<double>(activeWeapon0CSum);
+        const float denominator = weapon10Sum - activeWeapon0CSum;
 
-        if (!std::isnan(denominator) && denominator != 0.0)
+        // Steam 1.22 UCOMISS/LHAF/TEST sequence skips only ordered zero.
+        // NaN follows the arithmetic path, where CVTTSS2SI supplies integer-indefinite.
+        if (denominator != 0.0f)
         {
-            const double numerator = denominator -
-                (static_cast<double>(weapon0CSum) - static_cast<double>(activeWeapon0CSum));
-            const int projected = static_cast<int>((numerator * static_cast<double>(movementDelayMs)) / denominator);
+            const float inactiveWeapon0C = weapon0CSum - activeWeapon0CSum;
+            const float numerator = denominator - inactiveWeapon0C;
+            const float delayAsFloat = static_cast<float>(movementDelayMs);
+            const float scaled = numerator * delayAsFloat;
+            const float projectedFloat = scaled / denominator;
+            const int projected = spriteCvttss2si(projectedFloat);
             movementDelayMs = projected;
             if (projected < 5)
                 movementDelayMs = 0;
@@ -7319,15 +7326,15 @@ namespace as1
         const float weapon10 = vid->weaponFloatAt(0x10);
         const float weapon0C = vid->weaponFloatAt(0x0C);
 
-        if (!x87EqualOrUnordered(weapon10, 0.0f))
+        // Original executes this path for every value except ordered zero.
+        if (weapon10 != 0.0f)
         {
-            const double candidateDelay = static_cast<double>(vid->maxSpeedValue()) * 1000.0;
-            const double currentDelay = static_cast<double>(movementDelayMs);
-            if (candidateDelay < currentDelay ||
-                std::isnan(candidateDelay) || std::isnan(currentDelay))
-            {
-                movementDelayMs = spriteConvertFloatToInt32(static_cast<long double>(candidateDelay));
-            }
+            // 0x46E440 returns ActionAux max speed when present, otherwise VID max speed.
+            const float candidateDelay = sprite->runtimeMaxSpeedValue() * 1000.0f;
+            const float currentDelay = static_cast<float>(movementDelayMs);
+            // COMISS current,candidate + JBE: update only on ordered current > candidate.
+            if (currentDelay > candidateDelay)
+                movementDelayMs = spriteCvttss2si(candidateDelay);
         }
 
         weapon10Sum += weapon10;
@@ -7343,22 +7350,20 @@ namespace as1
         spriteFrameTimeSum += sprite->animationFrameTime();
 
         const int fixedDistance = sprite->ammoFixedPoint() / 64;
-        const int vidWeaponMetric = vid->activeWeaponAmmoCapacity();
+
+        // Retail chooses the linked VID weapon record for metric +0x28 whenever
+        // that linked VID owns a valid weapon descriptor/table.
+        VID* weaponMetricVid = vid;
+        if (VID* const link = vid->linkedVid())
+        {
+            if (link->hasWeaponChildDescriptor() != 0u && link->weaponCount() != 0u)
+                weaponMetricVid = link;
+        }
+        const int vidWeaponMetric = weaponMetricVid->activeWeaponAmmoCapacity();
 
         if (fixedDistance > 0)
         {
-            float weapon18 = vid->weaponBattleRange();
-            if (SPRITE* const child = sprite->childChain())
-            {
-                VID* const link = vid->linkedVid();
-                VID* const childVid = child->Vid();
-                if (childVid == link && link->hasWeaponChildDescriptor() != 0u &&
-                    link->weaponCount() != 0u &&
-                    x87EqualOrUnordered(weapon18, 0.0f))
-                {
-                    weapon18 = link->weaponBattleRange();
-                }
-            }
+            const float weapon18 = sprite->weaponBattleRangeRetail();
 
             if (weapon18 > maxBattleRange)
                 maxBattleRange = weapon18;
@@ -7426,19 +7431,6 @@ namespace as1
         return spriteCount;
     }
 
-    int SPRITE::EngineChainMetrics::weaponRatioScaledByEight() const noexcept
-    {
-        const float denominator = weapon0CSum;
-        if (denominator == 0.0f || std::isnan(denominator))
-            return 0;
-        const long double scaled =
-            (static_cast<long double>(weapon10Sum) / static_cast<long double>(denominator)) * 8.0L;
-        if (!std::isfinite(scaled) ||
-            scaled >= 9223372036854775808.0L || scaled < -9223372036854775808.0L)
-            return 0;
-        const std::int64_t converted = static_cast<std::int64_t>(std::trunc(scaled));
-        return static_cast<int>(static_cast<std::uint32_t>(converted));
-    }
 
     SPRITE* SPRITE::findCrossingConstraintOwner() noexcept
     {
@@ -7591,7 +7583,14 @@ namespace as1
             ChangeAnimation(12);
             playSfxAtWorldPosition(16);
 
-            const int damage = spriteMultiplyAndConvertToInt32(relativeSpeed, 1500.0f);
+            // Steam 1.22 0x421203..0x421227: three separate MULSS
+            // operations (1000, 3, 0.5) followed by CVTTSS2SI.  Do not fold
+            // this into a single 1500 multiplier because the binary32 rounding
+            // points are observable.
+            const float damageTimes1000 = relativeSpeed * 1000.0f;
+            const float damageTimes3 = damageTimes1000 * 3.0f;
+            const float damageScaled = damageTimes3 * 0.5f;
+            const int damage = spriteCvttss2si(damageScaled);
             int thisDamage = damage / 2;
             int targetDamage = damage / 2;
 
@@ -7772,9 +7771,11 @@ namespace as1
             }
 
             node->updatePositionFromPathEndpoints();
-            if ((!x87EqualOrUnordered(node->previousPathXRef(), 0.0f) ||
-                 !x87EqualOrUnordered(node->previousPathYRef(), 0.0f)) &&
-                x87AbsDiffGreaterOrdered(node->previousPathXRef(), node->m_xyz.x, 30.0f))
+            // sub_423500 tests ordered equality with UCOMISS/LAHF/TEST.
+            // Unordered is therefore treated as "not zero", not as equal.
+            if ((node->previousPathXRef() != 0.0f ||
+                 node->previousPathYRef() != 0.0f) &&
+                f32AbsDiffGreaterOrdered(node->previousPathXRef(), node->m_xyz.x, 30.0f))
             {
                 writeLogLine(g_fileLogger, kTrainCollapseBeginLog);
             }
@@ -7788,7 +7789,9 @@ namespace as1
             node->engineAccelerationDelayRef() = delay;
         }
 
-        if (!x87EqualOrUnordered(speed, 0.0f))
+        // sub_423500 enters the overlap scan for every value except an
+        // ordered exact zero.  NaN/unordered therefore also enters this path.
+        if (speed != 0.0f)
         {
             VID* const rootVid = root->Vid();
             const float rootX = root->m_xyz.x;
@@ -7811,17 +7814,17 @@ namespace as1
                     continue;
 
                 VID* const candidateVid = candidate->Vid();
-                if (!x87SumGreaterThanAbsDiffOrdered(
+                if (!f32SumGreaterThanAbsDiffOrdered(
                         candidateVid->halfSizeX(), rootVid->halfSizeX(),
                         candidate->m_xyz.x, rootX))
                     continue;
-                if (!x87SumGreaterThanAbsDiffOrdered(
+                if (!f32SumGreaterThanAbsDiffOrdered(
                         candidateVid->halfSizeY(), rootVid->halfSizeY(),
                         candidate->m_xyz.y, rootY))
                     continue;
-                if (x87SumLessOrUnordered(candidateVid->sizeZ(), candidate->m_xyz.z, rootZ))
+                if (f32SumLessOrUnordered(candidateVid->sizeZ(), candidate->m_xyz.z, rootZ))
                     continue;
-                if (x87SumLessOrUnordered(rootZ, rootVid->sizeZ(), candidate->m_xyz.z))
+                if (f32SumLessOrUnordered(rootZ, rootVid->sizeZ(), candidate->m_xyz.z))
                     continue;
 
                 if ((candidateVid->properties() & P_CRUSH) != 0)
@@ -7987,12 +7990,13 @@ namespace as1
             if (SPRITE* const child = linkedChild(ref))
             {
                 VID* const childVid = child->Vid();
-                // approximatePlanarDistance, then compares the live extended precision result against
-                // [WEAPON+0x18]-10 with comparison status test (<= or unordered).
-                const float dx = owner->m_xyz.x - child->m_xyz.x;
-                const float dy = owner->m_xyz.y - child->m_xyz.y;
-                return metricWithinFromRoundedDeltas(
-                           dx, dy, childVid->weaponBattleRange()) ? 1 : 0;
+                // Steam sub_424CE0 keeps the coordinate deltas and weighted range metric
+                // in binary32 (SUBSS/MULSS/ADDSS), then uses COMISS/SETBE against
+                // weaponBattleRange-10.0f.  Preserve those float rounding points here.
+                return metricWithinPositions(
+                           owner->m_xyz.x, owner->m_xyz.y,
+                           child->m_xyz.x, child->m_xyz.y,
+                           childVid->weaponBattleRange()) ? 1 : 0;
             }
 
             VID* const refVid = ref->Vid();
@@ -8010,8 +8014,8 @@ namespace as1
             if (SPRITE* const child = linkedChild(node))
             {
                 VID* const childVid = child->Vid();
-                // Loop routes 0x44CDB2+ keep the coordinate subtraction live
-                // in extended precision instead of spilling the deltas before the metric.
+                // The chain route in Steam sub_424CE0 uses the same binary32
+                // SUBSS/MULSS/ADDSS range test as the direct-child path above.
                 if (!metricWithinPositions(
                         owner->m_xyz.x, owner->m_xyz.y,
                         child->m_xyz.x, child->m_xyz.y,
@@ -8421,9 +8425,9 @@ namespace as1
 
         core::WeakController* const seed =
             core::findNearestLinkedNode3D(&core::globalWeakControllerMap(),
-                             spriteConvertFloatToInt32(static_cast<long double>(m_xyz.x)),
-                             spriteConvertFloatToInt32(static_cast<long double>(m_xyz.y)),
-                             spriteConvertFloatToInt32(static_cast<long double>(m_xyz.z)));
+                             spriteCvttss2si(m_xyz.x),
+                             spriteCvttss2si(m_xyz.y),
+                             spriteCvttss2si(m_xyz.z));
         if (!seed || seed->linkCount() == 0)
             return;
 
@@ -8483,18 +8487,31 @@ namespace as1
                 node->links()[static_cast<std::size_t>(pair.edgeIndex)];
             core::WeakController* const target = entry.target;
 
-            const double nodeDx = static_cast<double>(node->x()) - m_xyz.x;
-            const double nodeDy = static_cast<double>(node->y()) - m_xyz.y;
-            const double nodeDz = static_cast<double>(node->id()) - m_xyz.z;
-            const double targetDx = static_cast<double>(target->x()) - m_xyz.x;
-            const double targetDy = static_cast<double>(target->y()) - m_xyz.y;
-            const double targetDz = static_cast<double>(target->id()) - m_xyz.z;
+            // Retail keeps the vector/squared-distance arithmetic in binary32,
+            // converts only the squared sum to double for sqrt, then stores the
+            // result back to float before COMISS.
+            const float nodeDx = static_cast<float>(node->x()) - m_xyz.x;
+            const float nodeDy = static_cast<float>(node->y()) - m_xyz.y;
+            const float nodeDz = static_cast<float>(node->id()) - m_xyz.z;
+            const float nodeDx2 = nodeDx * nodeDx;
+            const float nodeDy2 = nodeDy * nodeDy;
+            const float nodeDz2 = nodeDz * nodeDz;
+            const float nodeXY2 = nodeDx2 + nodeDy2;
+            const float nodeSum2 = nodeXY2 + nodeDz2;
+            const float nodeDistance = static_cast<float>(std::sqrt(static_cast<double>(nodeSum2)));
 
-            const double nodeDistance = std::sqrt(nodeDx * nodeDx + nodeDy * nodeDy + nodeDz * nodeDz);
-            const double targetDistance = std::sqrt(targetDx * targetDx + targetDy * targetDy + targetDz * targetDz);
+            const float targetDx = static_cast<float>(target->x()) - m_xyz.x;
+            const float targetDy = static_cast<float>(target->y()) - m_xyz.y;
+            const float targetDz = static_cast<float>(target->id()) - m_xyz.z;
+            const float targetDx2 = targetDx * targetDx;
+            const float targetDy2 = targetDy * targetDy;
+            const float targetDz2 = targetDz * targetDz;
+            const float targetXY2 = targetDx2 + targetDy2;
+            const float targetSum2 = targetXY2 + targetDz2;
+            const float targetDistance = static_cast<float>(std::sqrt(static_cast<double>(targetSum2)));
 
-            if (targetDistance < nodeDistance ||
-                std::isnan(targetDistance) || std::isnan(nodeDistance))
+            // COMISS target,node + JBE keeps the current endpoint for <= and unordered.
+            if (targetDistance < nodeDistance)
             {
                 pair.progress = static_cast<int>(entry.length) - pair.progress;
                 pair.node = target;
@@ -8508,14 +8525,14 @@ namespace as1
                      primaryPathAuxiliaryRef(),
                      primaryPathEdgeIndexRef());
 
+        const float primaryOffsetX = radius * directionSin(facing);
+        const float primarySampleX = m_xyz.x + primaryOffsetX;
+        const float primaryOffsetY = radius * directionCos(facing);
+        const float primarySampleY = m_xyz.y - primaryOffsetY;
         core::findNearestPathPosition(seed,
-                         spriteConvertFloatToInt32(static_cast<long double>(radius) *
-                                             directionSin(facing) +
-                                         static_cast<long double>(m_xyz.x)),
-                         spriteConvertFloatToInt32(static_cast<long double>(m_xyz.y) -
-                                         static_cast<long double>(radius) *
-                                             directionCos(facing)),
-                         spriteConvertFloatToInt32(static_cast<long double>(m_xyz.z)),
+                         spriteCvttss2si(primarySampleX),
+                         spriteCvttss2si(primarySampleY),
+                         spriteCvttss2si(m_xyz.z),
                          &primary);
         repairToCloserTarget(primary);
         storePrimary(primary);
@@ -8527,14 +8544,14 @@ namespace as1
                      secondaryPathAuxiliaryRef(),
                      secondaryPathEdgeIndexRef());
 
+        const float secondaryOffsetX = radius * directionSin(reverseFacing);
+        const float secondarySampleX = m_xyz.x + secondaryOffsetX;
+        const float secondaryOffsetY = radius * directionCos(reverseFacing);
+        const float secondarySampleY = m_xyz.y - secondaryOffsetY;
         core::findNearestPathPosition(seed,
-                         spriteConvertFloatToInt32(static_cast<long double>(radius) *
-                                             directionSin(reverseFacing) +
-                                         static_cast<long double>(m_xyz.x)),
-                         spriteConvertFloatToInt32(static_cast<long double>(m_xyz.y) -
-                                         static_cast<long double>(radius) *
-                                             directionCos(reverseFacing)),
-                         spriteConvertFloatToInt32(static_cast<long double>(m_xyz.z)),
+                         spriteCvttss2si(secondarySampleX),
+                         spriteCvttss2si(secondarySampleY),
+                         spriteCvttss2si(m_xyz.z),
                          &secondary);
         repairToCloserTarget(secondary);
         storeSecondary(secondary);
@@ -8634,13 +8651,13 @@ namespace as1
                    pathAverageCoordinate(secondZ, firstZ));
 
         const bool reverseDirection = (derivedStateValue(0) & 1) != 0;
-        const int directionY = pathDirectionDeltaYToInt(
+        const float directionY = pathDirectionDeltaY(
             reverseDirection ? secondY : firstY,
             reverseDirection ? firstY : secondY);
-        const int directionX = pathDirectionDeltaXToInt(
+        const float directionX = pathDirectionDeltaX(
             reverseDirection ? secondX : firstX,
             reverseDirection ? firstX : secondX);
-        ChangeDirection(AngleFromXY(directionX, directionY, nullptr));
+        ChangeDirection(RetailDirectionFromFloatXY(directionX, directionY));
     }
 
     void SPRITE::splitEngineChainAtPosition(float x, float y) noexcept
@@ -8675,14 +8692,14 @@ namespace as1
         if (last != first)
         {
             last->resetEngineChainMovement();
-            if (x87IsZeroOrUnordered(last->m_speed))
+            if (last->m_speed == 0.0f)
             {
                 last->reverseEngineChain();
                 SPRITE* const head = last->engineChainHead();
                 head->m_speed = (static_cast<std::uint32_t>(head->derivedStateValue(0)) & 1u) != 0u ? -0.01f : 0.01f;
             }
 
-            if (x87IsZeroOrUnordered(first->m_speed))
+            if (first->m_speed == 0.0f)
             {
                 SPRITE* const head = first->engineChainHead();
                 head->m_speed = (static_cast<std::uint32_t>(head->derivedStateValue(0)) & 1u) != 0u ? -0.01f : 0.01f;
@@ -8704,10 +8721,10 @@ namespace as1
             ++count;
         }
 
-        const long double value =
-            static_cast<long double>(count) * static_cast<long double>(1.33f) +
-            static_cast<long double>(0.5f);
-        return spriteConvertFloatToInt32(value);
+        // Steam 1.22: CVTDQ2PS -> MULSS 1.33f -> ADDSS 0.5f -> CVTTSS2SI.
+        const float scaled = static_cast<float>(count) * 1.33f;
+        const float rounded = scaled + 0.5f;
+        return spriteCvttss2si(rounded);
     }
 
     void SPRITE::updateEngineChainSpeedTarget() noexcept
@@ -8726,8 +8743,8 @@ namespace as1
         range.categoryFlags = 0;
         range.collectEngineChainMetrics(head);
 
-        if (x87EqualOrUnordered(head->engineTargetSpeedRef(), 0.0f) &&
-            !x87EqualOrUnordered(range.weapon0CSum, 0.0f) &&
+        if (head->engineTargetSpeedRef() == 0.0f &&
+            range.weapon0CSum != 0.0f &&
             spriteDivideMultiplyAndConvertToInt32(range.weapon10Sum,
                                    range.weapon0CSum, 8.0f) > 7)
         {
@@ -8770,20 +8787,20 @@ namespace as1
             }
         }
 
-        if (x87LessOrUnordered(head->engineTargetSpeedRef(), 0.0f))
+        if (head->engineTargetSpeedRef() < 0.0f)
         {
             const int negativeDelay = static_cast<int>(0u - static_cast<std::uint32_t>(range.movementDelayMs));
-            head->engineTargetSpeedRef() = spriteFildMulStoreFloat(negativeDelay, 0.001f);
+            head->engineTargetSpeedRef() = static_cast<float>(negativeDelay) / 1000.0f;
             return;
         }
 
-        if (x87OrderedGreater(head->engineTargetSpeedRef(), 0.0f))
+        if (head->engineTargetSpeedRef() > 0.0f)
         {
-            head->engineTargetSpeedRef() = spriteFildMulStoreFloat(range.movementDelayMs, 0.001f);
-            const int delay = x87EqualOrUnordered(range.weapon0CSum, 0.0f)
-                ? 0
-                : spriteDivideMultiplyAndConvertToInt32(range.weapon10Sum,
-                                         range.weapon0CSum, 8.0f);
+            head->engineTargetSpeedRef() = static_cast<float>(range.movementDelayMs) / 1000.0f;
+            const int delay = range.weapon0CSum != 0.0f
+                ? spriteDivideMultiplyAndConvertToInt32(range.weapon10Sum,
+                                         range.weapon0CSum, 8.0f)
+                : 0;
             head->engineAccelerationDelayRef() = delay;
             if (delay == 0)
                 head->m_runtimeFlags &= ~MovementStartedFlag;
@@ -8793,10 +8810,9 @@ namespace as1
     void SPRITE::approachEngineTargetSpeed(float* speedOut) noexcept
     {
         constexpr float immediateSpeed = 0.03500000014901161f;
-        constexpr float tickScale = 0.000001f;
+        constexpr float timeDivisor = 1000000.0f;
 
-        if (pushLineActiveRef() != 0 &&
-            x87EqualOrUnordered(engineTargetSpeedRef(), 0.0f))
+        if (pushLineActiveRef() != 0 && engineTargetSpeedRef() == 0.0f)
         {
             *speedOut = immediateSpeed;
             engineAccelerationDelayRef() = 0;
@@ -8804,9 +8820,7 @@ namespace as1
         }
 
         const float target = engineTargetSpeedRef();
-        // target vs speed, comparison status test: acceleration runs only for an
-        // ordered target > speed comparison.
-        if (!x87LessEqualOrUnordered(target, *speedOut))
+        if (target > *speedOut)
         {
             if (engineAccelerationDelayRef() == 0)
                 updateEngineChainSpeedTarget();
@@ -8814,11 +8828,15 @@ namespace as1
             const int delay = engineAccelerationDelayRef();
             if (delay != 0)
             {
-                const std::uint32_t delta = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
+                const std::uint32_t delta =
+                    core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
                 const std::uint32_t product =
                     static_cast<std::uint32_t>(delta) * static_cast<std::uint32_t>(delay);
-                const double step = static_cast<double>(product) * static_cast<double>(tickScale);
-                *speedOut = static_cast<float>(static_cast<double>(*speedOut) + step + step);
+                // Retail corrects the IMUL low dword to an unsigned value, converts
+                // that to float, then performs DIVSS and two ADDSS operations.
+                const float step = static_cast<float>(product) / timeDivisor;
+                const float doubled = step + step;
+                *speedOut = *speedOut + doubled;
             }
 
             if (*speedOut >= target)
@@ -8829,20 +8847,25 @@ namespace as1
             return;
         }
 
-        if (x87LessOrUnordered(target, *speedOut))
+        if (target < *speedOut)
         {
-            const int delay = spriteConvertFloatToInt32(
-                (static_cast<long double>(*speedOut) * 1000.0L + 10.0L) * -0.5L);
+            // Steam 1.22: MULSS 1000, ADDSS 10, MULSS -0.5, CVTTSS2SI.
+            const float scaledSpeed = *speedOut * 1000.0f;
+            const float biased = scaledSpeed + 10.0f;
+            const float delayFloat = biased * -0.5f;
+            const int delay = spriteCvttss2si(delayFloat);
             engineAccelerationDelayRef() = delay;
 
-            const std::uint32_t delta = core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
-            const std::uint32_t product =
+            const std::uint32_t delta =
+                core::CurrentTimeMilliseconds() - core::PreviousWorldTimeMilliseconds();
+            const std::uint32_t rawProduct =
                 static_cast<std::uint32_t>(delta) * static_cast<std::uint32_t>(delay);
-            const std::int32_t signedProduct = static_cast<std::int32_t>(product);
-            const double step = static_cast<double>(signedProduct) * static_cast<double>(tickScale);
-            *speedOut = static_cast<float>(static_cast<double>(*speedOut) + step + step);
+            const std::int32_t signedProduct = static_cast<std::int32_t>(rawProduct);
+            const float step = static_cast<float>(signedProduct) / timeDivisor;
+            const float doubled = step + step;
+            *speedOut = *speedOut + doubled;
 
-            if (x87LessEqualOrUnordered(*speedOut, target))
+            if (*speedOut <= target)
             {
                 *speedOut = target;
                 engineAccelerationDelayRef() = 0;
@@ -8850,6 +8873,7 @@ namespace as1
             return;
         }
 
+        // Equal and unordered comparisons land here in retail.
         engineAccelerationDelayRef() = 0;
     }
 
@@ -8957,9 +8981,9 @@ namespace as1
             resolvedB4 = actionArgument3
                 ? reinterpret_cast<core::WeakController*>(static_cast<std::uintptr_t>(static_cast<std::uint32_t>(actionArgument3)))
                 : core::findNearestLinkedNode3D(&core::globalWeakControllerMap(),
-                                   spriteConvertFloatToInt32(static_cast<long double>(m_xyz.x)),
-                                   spriteConvertFloatToInt32(static_cast<long double>(m_xyz.y)),
-                                   spriteConvertFloatToInt32(static_cast<long double>(m_xyz.z)));
+                                   spriteTruncateFloatToInt32(m_xyz.x),
+                                   spriteTruncateFloatToInt32(m_xyz.y),
+                                   spriteTruncateFloatToInt32(m_xyz.z));
             resolvedB8 = actionArgument2;
         }
 
@@ -8973,7 +8997,16 @@ namespace as1
                 if (nextRef < 0)
                 {
                     const int nvid = refOwner->m_vid ? refOwner->m_vid->nvid() : -1;
-                    LOG::ResourceError("SPRITE %i", 4, "noRef at Release", nextRef, nvid);
+                    (void)logFileLoggerResourceError(
+                        g_fileLogger,
+                        "SPRITE[%i](%i,%i,%i)",
+                        4,
+                        "noRef at Release",
+                        nextRef,
+                        nvid,
+                        spriteTruncateFloatToInt32(refOwner->m_xyz.x),
+                        spriteTruncateFloatToInt32(refOwner->m_xyz.y),
+                        spriteTruncateFloatToInt32(refOwner->m_xyz.z));
                 }
                 else if (nextRef == 0)
                 {
@@ -10178,9 +10211,12 @@ namespace as1
 
     ANGLE SPRITE::DirectionTo(const VECTOR2& target) const
     {
-        const int dx = static_cast<int>(target.x - m_xyz.x);
-        const int dy = static_cast<int>(target.y - m_xyz.y);
-        return ANGLE::FromXY(dx, dy);
+        // Steam native DirectionTo (90) calls sub_461D00, which performs
+        // SUBSS on the target/source coordinates and feeds the float deltas
+        // directly to sub_445600.  Do not truncate the deltas to integers.
+        const float dx = target.x - m_xyz.x;
+        const float dy = target.y - m_xyz.y;
+        return RetailDirectionFromFloatXY(dx, dy);
     }
 
     int SPRITE::Action(int opcode, std::intptr_t argument1Carrier, int argument2Carrier, int argument3Carrier)
@@ -10359,7 +10395,7 @@ namespace as1
             int createNvid = argument1;
             if (createNvid == 0)
                 createNvid = dispatchVirtualAction(
-                    static_cast<std::uint32_t>(InternalActionCode::RandomItemBySpriteType),
+                    static_cast<std::uint32_t>(ActionCode::ACT_GET_ITEM_TYPE),
                     4, 0, 0);
 
             core::ApplicationVidTable& table = core::GlobalApplicationVidTable();
@@ -10456,7 +10492,7 @@ namespace as1
         case static_cast<std::uint32_t>(ActionCode::ACT_GET_ITEM):
             return commandWordAt(argument1);
 
-        case static_cast<std::uint32_t>(InternalActionCode::RandomItemBySpriteType):
+        case static_cast<std::uint32_t>(ActionCode::ACT_GET_ITEM_TYPE):
         {
             const std::uint32_t mask = argument1 != 0
                 ? static_cast<std::uint32_t>(argument1)
@@ -10522,7 +10558,7 @@ namespace as1
             break;
         }
 
-        case 74:
+        case static_cast<std::uint32_t>(ActionCode::ACT_RESTORE_COMMAND):
         {
             SPRITE* const target = reinterpret_cast<SPRITE*>(
                 static_cast<std::uintptr_t>(static_cast<std::uint32_t>(argument1)));
@@ -10668,7 +10704,7 @@ namespace as1
             break;
         }
 
-        case static_cast<std::uint32_t>(InternalActionCode::CopyCommandPrefixToSprite):
+        case static_cast<std::uint32_t>(ActionCode::ACT_COPY_STACK_TO):
         {
             SPRITE* const target = reinterpret_cast<SPRITE*>(
                 static_cast<std::uintptr_t>(static_cast<std::uint32_t>(argument1)));
@@ -10676,7 +10712,7 @@ namespace as1
             return 0;
         }
 
-        case static_cast<std::uint32_t>(InternalActionCode::GetCommandStackCount):
+        case static_cast<std::uint32_t>(ActionCode::ACT_NO_STACK):
             return static_cast<int>(m_commandStack.m_commandRecords.count);
 
         case static_cast<std::uint32_t>(ActionCode::ACT_CHANGE_DIRECTION):
@@ -10973,9 +11009,9 @@ namespace as1
         }
 
         case static_cast<std::uint32_t>(ActionCode::ACT_GET_BATTLE_RANGE):
-            return spriteConvertFloatToInt32(static_cast<long double>(weaponBattleRangeRetail()));
+            return spriteCvttss2si(weaponBattleRangeRetail());
 
-        case static_cast<std::uint32_t>(ActionCode::ACT_GET_ANIMATION):
+        case static_cast<std::uint32_t>(ActionCode::ACT_SET_GOAL_COOR):
         {
             SPRITE* const goal = new (std::nothrow) SPRITE(
                 mapOwner(),
@@ -11055,15 +11091,14 @@ namespace as1
         case static_cast<std::uint32_t>(ActionCode::ACT_GET_ZSPEED):
         {
 
-            returnValue = spriteConvertFloatToInt32(
-                static_cast<long double>(m_zSpeed) * 1000.0L);
+            returnValue = spriteCvttss2si(m_zSpeed * 1000.0f);
 
             break;
         }
 
         case static_cast<std::uint32_t>(ActionCode::ACT_SET_ZSPEED):
         {
-            m_zSpeed = spriteFildMulF32(argument1, 0.001f);
+            m_zSpeed = static_cast<float>(argument1) / 1000.0f;
 
             break;
         }
@@ -11071,15 +11106,14 @@ namespace as1
         case static_cast<std::uint32_t>(ActionCode::ACT_GET_SPEED):
         {
 
-            returnValue = spriteConvertFloatToInt32(
-                static_cast<long double>(m_speed) * 1000.0L);
+            returnValue = spriteCvttss2si(m_speed * 1000.0f);
 
             break;
         }
 
         case static_cast<std::uint32_t>(ActionCode::ACT_SET_SPEED):
         {
-            m_speed = spriteFildMulF32(argument1, 0.001f);
+            m_speed = static_cast<float>(argument1) / 1000.0f;
 
             break;
         }
@@ -11124,7 +11158,7 @@ namespace as1
             break;
         }
 
-        case static_cast<std::uint32_t>(ActionCode::ACT_CYCLE_STACK):
+        case static_cast<std::uint32_t>(ActionCode::ACT_GOTO_STACK):
         {
             const std::uint32_t nextCount = static_cast<std::uint32_t>(argument1) + 1u;
             m_commandStack.setCommandRecordCount(nextCount);
@@ -11399,8 +11433,12 @@ namespace as1
         {
             const int nvid = m_vid ? m_vid->nvid() : -1;
             LOG::ResourceError(
-                "SPRITE %i", 10, "Action() have not this act",
-                static_cast<int>(opcode), nvid);
+                "SPRITE[%i](%i,%i,%i)", 10, "Action() have not this act",
+                static_cast<int>(opcode),
+                nvid,
+                spriteCvttss2si(m_xyz.x),
+                spriteCvttss2si(m_xyz.y),
+                spriteCvttss2si(m_xyz.z));
             break;
         }
         }

@@ -134,33 +134,37 @@ namespace as1 { namespace core
         }
 
 
+        int readOptionsProfileInt(const char* path, int defaultValue)
+        {
+            char defaultText[32] = {};
+            std::snprintf(defaultText, sizeof(defaultText), "%d", defaultValue);
+            const STRING value = as1::FLoadData(STRING(path), STRING(defaultText));
+            return std::atoi(value.c_str());
+        }
+
         void readStartupRegistryVideoSettings(StartupConfiguration& config)
         {
-
-            STRING deviceKey;
-            constructStringFromBytes(deviceKey, "Device", std::strlen("Device"));
-            g_startupSettings.device = readRegistryInt(*g_startupRegistryPathOwner, deviceKey, g_startupSettings.device);
+            // Steam 1.22 reads these fields from the persistent options-profile
+            // object (0x4F8000), not
+            // from the Windows registry.  See startup block 0x435BBC..0x435F7F.
+            g_startupSettings.device =
+                readOptionsProfileInt("options://graph/Device", g_startupSettings.device);
             config.video.device = g_startupSettings.device;
 
-            STRING screenWidthKey;
-            constructStringFromBytes(screenWidthKey, "ScreenX", std::strlen("ScreenX"));
-            g_startupSettings.screenWidth = readRegistryInt(*g_startupRegistryPathOwner, screenWidthKey, g_startupSettings.screenWidth);
+            g_startupSettings.screenWidth =
+                readOptionsProfileInt("options://graph/ScreenX", g_startupSettings.screenWidth);
             config.video.screenX = g_startupSettings.screenWidth;
 
-            STRING screenHeightKey;
-            constructStringFromBytes(screenHeightKey, "ScreenY", std::strlen("ScreenY"));
-            g_startupSettings.screenHeight = readRegistryInt(*g_startupRegistryPathOwner, screenHeightKey, g_startupSettings.screenHeight);
+            g_startupSettings.screenHeight =
+                readOptionsProfileInt("options://graph/ScreenY", g_startupSettings.screenHeight);
             config.video.screenY = g_startupSettings.screenHeight;
 
-            STRING colorDepthKey;
-
-            constructStringFromBytes(colorDepthKey, "BPP", std::strlen("BPP"));
-            g_startupSettings.colorDepth = readRegistryInt(*g_startupRegistryPathOwner, colorDepthKey, g_startupSettings.colorDepth);
+            g_startupSettings.colorDepth =
+                readOptionsProfileInt("options://graph/BPP", g_startupSettings.colorDepth);
             config.video.colorDepth = g_startupSettings.colorDepth;
 
-            STRING fullscreenKey;
-            constructStringFromBytes(fullscreenKey, "FullScreen", std::strlen("FullScreen"));
-            g_startupSettings.fullscreen = readRegistryInt(*g_startupRegistryPathOwner, fullscreenKey, g_startupSettings.fullscreen);
+            g_startupSettings.fullscreen =
+                readOptionsProfileInt("options://graph/FullScreen", g_startupSettings.fullscreen);
             config.video.fullscreen = g_startupSettings.fullscreen != 0;
         }
 
@@ -181,7 +185,6 @@ namespace as1 { namespace core
 
         void readWindowPositionRegistrySettings(StartupConfiguration& config, bool graphFullscreen)
         {
-
             if (graphFullscreen)
             {
                 config.video.windowPositionX = 0;
@@ -189,13 +192,12 @@ namespace as1 { namespace core
                 return;
             }
 
-            STRING windowPositionXKey;
-            constructStringFromBytes(windowPositionXKey, "WindowPositionX", std::strlen("WindowPositionX"));
-            config.video.windowPositionX = readRegistryInt(*g_startupRegistryPathOwner, windowPositionXKey, 0);
-
-            STRING windowPositionYKey;
-            constructStringFromBytes(windowPositionYKey, "WindowPositionY", std::strlen("WindowPositionY"));
-            config.video.windowPositionY = readRegistryInt(*g_startupRegistryPathOwner, windowPositionYKey, 0);
+            // Steam reads both values from options.ini and uses 50 as the default
+            // for each coordinate (startup block 0x43619B..0x436299).
+            config.video.windowPositionX =
+                readOptionsProfileInt("options://WindowPositionX", 50);
+            config.video.windowPositionY =
+                readOptionsProfileInt("options://WindowPositionY", 50);
         }
 
 
@@ -250,8 +252,8 @@ namespace as1 { namespace core
 
         void readSoundQualityRegistrySetting(StartupConfiguration& config)
         {
-            const STRING value = as1::FileDataLoad(
-                STRING("options:\\sound\\SoundHighQuality"), STRING("0"));
+            const STRING value = as1::FLoadData(
+                STRING("options://sound/SoundHighQuality"), STRING("0"));
             config.sound.highQuality = std::atoi(value.c_str()) != 0;
         }
 

@@ -33,6 +33,12 @@ namespace as1
 #endif
         }
 
+        int retailWrapAddSoftware(int lhs, int rhs) noexcept
+        {
+            return static_cast<std::int32_t>(static_cast<std::uint32_t>(lhs) +
+                                             static_cast<std::uint32_t>(rhs));
+        }
+
         int retailWrapSubSoftware(int lhs, int rhs) noexcept
         {
             return static_cast<int>(static_cast<std::uint32_t>(lhs) - static_cast<std::uint32_t>(rhs));
@@ -714,15 +720,15 @@ namespace as1
             drawTop + sizeY < clipTop || drawTop >= clipBottom)
             return;
 
-        int baseDepth = static_cast<int>(sprite->Z() * 8.0f);
+        int baseDepth = truncateFloatToInt32Software(sprite->Z() * 8.0f);
         if ((property & P_ALWAYSTOP) != 0u && baseDepth < 0x3FFF)
-            baseDepth += 0x3FFF;
+            baseDepth = retailWrapAddSoftware(baseDepth, 0x3FFF);
         else if ((property & P_WAVE) != 0u)
         {
-            const int waveDepth = static_cast<int>(
+            const int waveDepth = truncateFloatToInt32Software(
                 SPRITE::rawDirectionSin(static_cast<int>((core::CurrentTimeMilliseconds() >> 3u) & 0xFFu)) *
                 moveUpZ() * 8.0f);
-            baseDepth += waveDepth;
+            baseDepth = retailWrapAddSoftware(baseDepth, waveDepth);
             drawTop += waveDepth / -8;
         }
 

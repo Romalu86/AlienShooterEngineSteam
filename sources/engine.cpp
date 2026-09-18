@@ -19,6 +19,10 @@
 #include <cstring>
 #include <new>
 
+#if defined(_MSC_VER) && defined(_M_IX86)
+#include <xmmintrin.h>
+#endif
+
 namespace as1
 {
     namespace
@@ -45,13 +49,15 @@ namespace as1
 
         int engineConvertFloatToInt32(float value) noexcept
         {
-            const long double d = static_cast<long double>(value);
-            if (!std::isfinite(d) ||
-                d < static_cast<long double>(INT64_MIN) ||
-                d > static_cast<long double>(INT64_MAX))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(static_cast<std::uint64_t>(converted)));
+#if defined(_MSC_VER) && defined(_M_IX86)
+            // Retail uses CVTTSS2SI directly.  Invalid/overflow inputs therefore
+            // produce the SSE indefinite integer 0x80000000, not a synthetic 0.
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (!std::isfinite(value) || value < -2147483648.0f || value >= 2147483648.0f)
+                return static_cast<int>(0x80000000u);
+            return static_cast<int>(value);
+#endif
         }
 
         int engineSub32Wrap(int lhs, int rhs) noexcept
@@ -69,16 +75,17 @@ namespace as1
             return static_cast<float>(value);
         }
 
-        bool engineFcompEqualOrUnorderedZero(float value) noexcept
+        bool engineOrderedEqualZero(float value) noexcept
         {
-            // floating-point comparison + comparison status test takes the branch for equal and unordered.
-            return value == 0.0f || std::isnan(value);
+            // Retail UCOMISS/LAHF/TEST AH,44h reaches the equal path only for
+            // ordered equality. NaN follows the unordered/non-equal path.
+            return value == 0.0f;
         }
 
         bool engineLessEqualOrUnordered(float lhs, float rhs) noexcept
         {
-            // Less-than, equality and unordered values all take this branch.
-            return lhs <= rhs || std::isnan(lhs) || std::isnan(rhs);
+            // COMISS + JBE: <= and unordered take the same path.
+            return !(lhs > rhs);
         }
 
         float engineRawConstantFloat(DWORD bits) noexcept
@@ -91,7 +98,9 @@ namespace as1
 
         bool engineSpeedExceedsStopThreshold(float speed, float threshold) noexcept
         {
-            return std::isnan(speed) || std::isnan(threshold) || threshold < std::fabs(speed);
+            // Retail compares |speed| against the threshold with COMISS/JBE.
+            // Unordered values take JBE and therefore do not enter the damage loop.
+            return std::fabs(speed) > threshold;
         }
 
         VID* engineActionApplicationVid(int index) noexcept
@@ -401,7 +410,7 @@ namespace as1
 #endif
             changeArmyBucket(static_cast<signed char>(argument1));
 #ifdef _WIN32
-            if (!engineFcompEqualOrUnorderedZero(Vid()->weaponFloatAt(16)))
+            if (!engineOrderedEqualZero(Vid()->weaponFloatAt(16)))
             {
                 PLAYER* const player = win::applicationWinInstance()->startupPlayerSlotByIndex(
                     armyIndex());
@@ -591,14 +600,6 @@ namespace as1
                 if ((d1 < d2 ? d1 : d2) > 127u)
                     setDerivedStateValue(0, derivedStateValue(0) | 1);
             }
-#ifdef _WIN32
-            if (!engineFcompEqualOrUnorderedZero(Vid()->weaponFloatAt(16)))
-            {
-                PLAYER* const player = win::applicationWinInstance()->startupPlayerSlotByIndex(
-                    armyIndex());
-                player->noOpSpriteCallback(this);
-            }
-#endif
             return 0;
         }
 
@@ -790,7 +791,7 @@ namespace as1
                         VID* const childVid = child->Vid();
                         const bool childLinkReady = childVid == vid->linkedVid() &&
                             childVid->hasWeaponChildDescriptor() && childVid->weaponCount() &&
-                            engineFcompEqualOrUnorderedZero(vid->weaponBattleRange());
+                            engineOrderedEqualZero(vid->weaponBattleRange());
                         VID* const thresholdVid = childLinkReady ? childVid : vid;
                         if (distance < thresholdVid->weaponBattleRange())
                             result = child->SetCommandWithoutLink(4, target);
@@ -1063,7 +1064,7 @@ namespace as1
                     sprite->currentAnimation(), ammo, sprite->animationFrameTime(),
                     sprite->attackDecisionCode(), nvidOf(sprite->goalSprite()),
                     nvidOf(sprite->bestTargetSprite()),
-                    static_cast<int>(sprite->Speed() * 1000.0f),
+                    engineConvertFloatToInt32(sprite->Speed() * 1000.0f),
                     static_cast<int>(sprite->actionTimer()));
             }
             else
@@ -1092,7 +1093,7 @@ namespace as1
             routeActionReadyRef(),
             static_cast<int>((runtimeFlags() >> 7u) & 1u),
             engineAccelerationDelayRef(),
-            static_cast<int>(engineTargetSpeedRef() * 1000.0f),
+            engineConvertFloatToInt32(engineTargetSpeedRef() * 1000.0f),
             PathSearchResultScore(),
             PathSearchSecondaryBestCost());
 

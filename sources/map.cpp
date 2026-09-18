@@ -1,6 +1,5 @@
 #include "map.h"
 #include "vid/vid_software.h"
-#include "vid/vid_software_png.h"
 #include "vid/vid_software16.h"
 #include "vid/vid_hardware.h"
 #include "vid/vid_hardware_z.h"
@@ -60,18 +59,20 @@
 
 namespace as1
 {
-    long double approximatePlanarDistance(float dx, float dy) noexcept
+    float approximatePlanarDistance(float dx, float dy) noexcept
     {
         // The game logic performs single-precision subtraction/double-precision widening(abs mask)/single-precision narrowing and then
         // single-precision multiplication/single-precision addition.  Keep every arithmetic result in binary32; the original
         // only widens the final stored float when floating-point load returns it through extended precision.
         const float ax = std::fabs(dx);
         const float ay = std::fabs(dy);
-        const float metric =
-            (ax <= ay || std::isnan(ax) || std::isnan(ay))
-                ? ax * 0.5f + ay
-                : ax + ay * 0.5f;
-        return static_cast<long double>(metric);
+        // Retail uses COMISS ax, ay followed by JBE.  JBE also takes the
+        // unordered case, which is exactly expressed by !(ax > ay) without
+        // separate isnan helpers.
+        const float metric = !(ax > ay)
+            ? ax * 0.5f + ay
+            : ax + ay * 0.5f;
+        return metric;
     }
 
     namespace
@@ -172,26 +173,24 @@ namespace as1
         }
 #endif
 
-        int mapConvertFloatToInt32(float value) noexcept
-        {
-            const long double d = static_cast<long double>(value);
-            if (!std::isfinite(d) ||
-                d < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                d > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
-        }
-
         int truncateFloatToInt32ForMap(float value) noexcept
         {
 #if defined(_MSC_VER) && defined(_M_IX86)
             return _mm_cvtt_ss2si(_mm_set_ss(value));
 #else
-            if (!std::isfinite(value) || value < -2147483648.0f || value >= 2147483648.0f)
+            // CVTTSS2SI returns integer-indefinite for unordered/out-of-range.
+            if (!(value >= -2147483648.0f && value < 2147483648.0f))
                 return static_cast<int>(0x80000000u);
             return static_cast<int>(value);
 #endif
+        }
+
+        int mapConvertFloatToInt32(float value) noexcept
+        {
+            // Audited callers map to direct CVTTSS2SI sites (sub_438BB0,
+            // sub_43F790/sub_43FAB0/sub_438740).  Do not substitute a host
+            // int64 conversion that returns zero for NaN/overflow.
+            return truncateFloatToInt32ForMap(value);
         }
 
         float retailMinssForMap(float destination, float source) noexcept
@@ -220,38 +219,49 @@ namespace as1
 
         int mapMultiplyAndConvertToInt32(float value, float multiplier) noexcept
         {
-            const long double d = static_cast<long double>(value) * static_cast<long double>(multiplier);
-            if (!std::isfinite(d) ||
-                d < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                d > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
-        }
-
-        bool x87LessOrUnorderedForMap(float lhs, float rhs) noexcept
-        {
-            return lhs < rhs || std::isnan(lhs) || std::isnan(rhs);
+            // sub_43F790/sub_43FAB0/sub_438740: MULSS -> CVTTSS2SI.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            const __m128 scaled = _mm_mul_ss(_mm_set_ss(value), _mm_set_ss(multiplier));
+            return _mm_cvtt_ss2si(scaled);
+#else
+            const float scaled = value * multiplier;
+            return truncateFloatToInt32ForMap(scaled);
+#endif
         }
 
         int retailTerrainGridDimension(float extent) noexcept
         {
-            const int raw = static_cast<int>(extent + 7.0f);
+            // sub_43EFC0: ADDSS 7.0 -> CVTTSS2SI, then signed /8 rounded
+            // toward zero via CDQ/AND/ADD/SAR.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            const float expanded = _mm_cvtss_f32(
+                _mm_add_ss(_mm_set_ss(extent), _mm_set_ss(7.0f)));
+#else
+            const float expanded = extent + 7.0f;
+#endif
+            const int raw = truncateFloatToInt32ForMap(expanded);
             return (raw + (raw < 0 ? 7 : 0)) >> 3;
         }
 
         int mapGridCoordinate(float value, float limit) noexcept
         {
+            // sub_43B680.  Negative ordered values clamp to zero; unordered
+            // values follow the value*0.125 path and therefore reach CVTTSS2SI
+            // as NaN (integer-indefinite), rather than being synthesized as 0.
             if (value < 0.0f)
                 return 0;
-            const float chosen = (value < limit || std::isnan(value)) ? value : (limit - 1.0f);
-            const long double scaled = static_cast<long double>(chosen) * 0.125L;
-            if (!std::isfinite(scaled) ||
-                scaled < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                scaled > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(scaled));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
+
+            float chosen = value;
+            if (value >= limit)
+            {
+#if defined(_MSC_VER) && defined(_M_IX86)
+                chosen = _mm_cvtss_f32(
+                    _mm_sub_ss(_mm_set_ss(limit), _mm_set_ss(1.0f)));
+#else
+                chosen = limit - 1.0f;
+#endif
+            }
+            return mapMultiplyAndConvertToInt32(chosen, 0.125f);
         }
 
         std::uint32_t currentMilliseconds()
@@ -312,11 +322,6 @@ namespace as1
         bool isApplicationRenderPass(int pass) noexcept
         {
             return pass >= 0 && pass <= 10;
-        }
-
-        int applicationRenderPassSequenceIndex(int pass) noexcept
-        {
-            return isApplicationRenderPass(pass) ? pass : -1;
         }
 
         MapCameraClampRect buildMapCameraClampRect(const GRAPH& graph,
@@ -892,10 +897,7 @@ namespace as1
             LoadSfx(res);
         if (loadConstantsBlock)
             LoadConstants(res);
-        const bool loaded = loadVids(res, true, false);
-        if (loaded)
-            finishResourcesLoad();
-        return loaded;
+        return loadVids(res, true, false);
     }
 
     bool MAP::hostLoadVidDepot(RESOURCE* res)
@@ -1455,21 +1457,6 @@ namespace as1
         return new VID_SOFTWARE16();
     }
 
-    VID* MAP::createVIDByType(VID::VidType type, bool, bool) const
-    {
-        switch (type)
-        {
-        case VID::VidType::type_VID_SOFTWARE:     return new VID_SOFTWARE();
-        case VID::VidType::type_VID_SOFTWARE_PNG: return new VID_SOFTWARE_PNG();
-        case VID::VidType::type_VID_SOFTWARE16:   return new VID_SOFTWARE16();
-        case VID::VidType::type_VID_FONT:         return new VID_FONT();
-        case VID::VidType::type_VID_HARDWARE:   return new VID_HARDWARE();
-        case VID::VidType::type_VID_HARDWARE_Z: return new VID_HARDWARE_Z();
-        case VID::VidType::type_VID_SURFACE:    return new VID_SURFACE();
-        case VID::VidType::type_VID_LIGHT:      return new VID_LIGHT();
-        default:                                return new VID();
-        }
-    }
 
     VID* MAP::Vid(int nvid) const
     {
@@ -2344,17 +2331,11 @@ namespace as1
         if (m_graph && !m_useLegacyCompactSpriteRecords)
         {
             const MapCameraClampRect cameraRect = buildMapCameraClampRect(*m_graph, m_scrollMinXY, m_scrollMaxXY);
-            SetShiftCoor(m_shiftXY.x + cameraRect.screenW * 0.5f,
+            SetPosition(m_shiftXY.x + cameraRect.screenW * 0.5f,
                          m_shiftXY.y + cameraRect.screenH * 0.5f,
                          0);
         }
         return true;
-    }
-
-    int MAP::hostReinitializeGridFromMapSize()
-    {
-        ResetGroundZ();
-        return 0;
     }
 
     void MAP::loadGridZ(RESOURCE* map)
@@ -2872,35 +2853,6 @@ namespace as1
         return y - z - m_shiftXY.y;
     }
 
-    VECTOR2 MAP::ToScreenScaled(const VECTOR& world) const
-    {
-        return VECTOR2{ToScreenX(world.x), ToScreenY(world.y, world.z)};
-    }
-
-    float MAP::ToScreenScaledShiftX(float x, float shiftX, float scale) const
-    {
-        const float safeScale = (scale == 0.0f) ? 1.0f : scale;
-        return (x - shiftX) * safeScale;
-    }
-
-    float MAP::ToScreenScaledShiftY(float y, float z, float shiftY, float scale) const
-    {
-        const float safeScale = (scale == 0.0f) ? 1.0f : scale;
-        return (y - z - shiftY) * safeScale;
-    }
-
-    float MAP::FromScreenScaledShiftX(float x, float shiftX, float scale) const
-    {
-        const float safeScale = (scale == 0.0f) ? 1.0f : scale;
-        return x / safeScale + shiftX;
-    }
-
-    float MAP::FromScreenScaledShiftY(float y, float z, float shiftY, float scale) const
-    {
-        const float safeScale = (scale == 0.0f) ? 1.0f : scale;
-        return y / safeScale + z + shiftY;
-    }
-
     void MAP::SetScrollBox(float minX, float minY, float maxX, float maxY)
     {
 
@@ -2916,7 +2868,7 @@ namespace as1
         appDraw.setScrollMaxYLimit(maxY);
     }
 
-    void MAP::SetShiftCoor(float centerX, float centerY, int effect)
+    void MAP::SetPosition(float centerX, float centerY, int effect)
     {
         core::ApplicationDrawDispatcherState& appDraw =
             core::GlobalApplicationDrawDispatcherState();
@@ -2987,6 +2939,10 @@ namespace as1
         view._22 = 1.0f;
         view._32 = -1.0f;
         view._33 = 1.0f;
+        // sub_43F800 seeds the first 12 floats from xmmword_4DAFC0/
+        // 4DAFD0/4DAFE0 and then explicitly writes the last row.  The Z
+        // translation is 128.0f in the retail VIEW matrix.
+        view._43 = 128.0f;
 
         // The game logic uses the viewport center here, not half of the full
         // render surface.  This distinction matters when a 640x480 logical
@@ -3520,13 +3476,10 @@ namespace as1
         mapSizeX = core::ApplicationMapWidth();
         mapSizeY = core::ApplicationMapHeight();
 #endif
-        if (x87LessOrUnorderedForMap(x, 0.0f))
-            return;
-        if (!x87LessOrUnorderedForMap(x, mapSizeX))
-            return;
-        if (x87LessOrUnorderedForMap(y, 0.0f))
-            return;
-        if (!x87LessOrUnorderedForMap(y, mapSizeY))
+        // sub_43F790 uses ordered [0,size) COMISS bounds.  Either an
+        // unordered coordinate or unordered extent is rejected.
+        if (!(x >= 0.0f) || !(mapSizeX > x) ||
+            !(y >= 0.0f) || !(mapSizeY > y))
             return;
 
         const int zInt = mapConvertFloatToInt32(z);
@@ -3551,20 +3504,30 @@ namespace as1
         mapSizeX = core::ApplicationMapWidth();
         mapSizeY = core::ApplicationMapHeight();
 #endif
-        if (x < 0.0f || x >= mapSizeX || y < 0.0f || y >= mapSizeY)
+        // sub_43FAB0 uses ordered [0,size) COMISS bounds.  Unordered values
+        // are rejected by the same branch sequence.
+        if (!(x >= 0.0f) || !(mapSizeX > x) ||
+            !(y >= 0.0f) || !(mapSizeY > y))
             return;
-        const int zInt = static_cast<int>(z);
-        const int index = static_cast<int>(x) / 8 - static_cast<int>(y * -0.125f) * terrainGridWidth();
+
+        const int zInt = truncateFloatToInt32ForMap(z);
+        const int xInt = truncateFloatToInt32ForMap(x);
+        const int xDiv8 = (xInt + (xInt < 0 ? 7 : 0)) >> 3;
+        const int negativeGridY = mapMultiplyAndConvertToInt32(y, -0.125f);
+        const int yProduct = static_cast<int>(
+            static_cast<std::uint32_t>(negativeGridY) *
+            static_cast<std::uint32_t>(terrainGridWidth()));
+        const int index = static_cast<int>(
+            static_cast<std::uint32_t>(xDiv8) - static_cast<std::uint32_t>(yProduct));
 #ifdef _WIN32
         short* const temp = core::ApplicationTempTerrainGrid();
-        const int cells = terrainGridWidth() * terrainGridHeight();
-        if (temp && index >= 0 && index < cells && static_cast<int>(temp[index]) < zInt)
-            temp[index] = static_cast<short>(zInt);
+        if (temp && static_cast<int>(temp[index]) < zInt)
+            temp[index] = static_cast<short>(static_cast<unsigned int>(zInt) & 0xFFFFu);
 #else
         const std::size_t cells = static_cast<std::size_t>(terrainGridWidth()) * static_cast<std::size_t>(terrainGridHeight());
         std::vector<short>& temp = tempTerrainGridFor(this, cells);
         if (index >= 0 && static_cast<std::size_t>(index) < temp.size() && static_cast<int>(temp[static_cast<std::size_t>(index)]) < zInt)
-            temp[static_cast<std::size_t>(index)] = static_cast<short>(zInt);
+            temp[static_cast<std::size_t>(index)] = static_cast<short>(static_cast<unsigned int>(zInt) & 0xFFFFu);
 #endif
     }
 
@@ -3576,14 +3539,24 @@ namespace as1
         mapSizeX = core::ApplicationMapWidth();
         mapSizeY = core::ApplicationMapHeight();
 #endif
-        if (x < 0.0f || x >= mapSizeX || y < 0.0f || y >= mapSizeY)
+        // sub_438740 uses the same ordered bounds and CVTT/MULSS index path
+        // as SetTempGroundZ.
+        if (!(x >= 0.0f) || !(mapSizeX > x) ||
+            !(y >= 0.0f) || !(mapSizeY > y))
             return;
-        const int zInt = static_cast<int>(z);
-        const int index = static_cast<int>(x) / 8 - static_cast<int>(y * -0.125f) * terrainGridWidth();
+
+        const int zInt = truncateFloatToInt32ForMap(z);
+        const int xInt = truncateFloatToInt32ForMap(x);
+        const int xDiv8 = (xInt + (xInt < 0 ? 7 : 0)) >> 3;
+        const int negativeGridY = mapMultiplyAndConvertToInt32(y, -0.125f);
+        const int yProduct = static_cast<int>(
+            static_cast<std::uint32_t>(negativeGridY) *
+            static_cast<std::uint32_t>(terrainGridWidth()));
+        const int index = static_cast<int>(
+            static_cast<std::uint32_t>(xDiv8) - static_cast<std::uint32_t>(yProduct));
 #ifdef _WIN32
         short* const temp = core::ApplicationTempTerrainGrid();
-        const int cells = terrainGridWidth() * terrainGridHeight();
-        if (temp && index >= 0 && index < cells && static_cast<int>(temp[index]) == zInt)
+        if (temp && static_cast<int>(temp[index]) == zInt)
             temp[index] = 0;
 #else
         const std::size_t cells = static_cast<std::size_t>(terrainGridWidth()) * static_cast<std::size_t>(terrainGridHeight());
@@ -3634,73 +3607,126 @@ namespace as1
         mapSizeY = core::ApplicationMapHeight();
 #endif
 
-        // 0x40E6A8..0x40E6FC has asymmetric temporary stores.  All four final
-        // raw bounds are binary32 store before the clamp stage, so model those
-        // exact binary32 boundaries explicitly.
-        const long double halfXExtended =
-            static_cast<long double>(vid->sizeXYZ.x) * 0.5L;
-        const long double halfYExtended =
-            static_cast<long double>(vid->sizeXYZ.y) * 0.5L;
-        const float halfYStored = static_cast<float>(halfYExtended); // explicit binary32 store before the next extended precision operation
-        const float maxXRaw = static_cast<float>(
-            static_cast<long double>(v.x) + halfXExtended - 3.0L);
-        const float maxYRaw = static_cast<float>(
-            static_cast<long double>(v.y) + halfYExtended - 3.0L);
-        const float minXRaw = static_cast<float>(
-            static_cast<long double>(v.x) - (halfXExtended - 3.0L));
-        const float minYRaw = static_cast<float>(
-            static_cast<long double>(v.y) -
-            (static_cast<long double>(halfYStored) - 3.0L));
+        // Steam 1.22 sub_43B720 is entirely scalar SSE through the bound
+        // construction and clamp stage: MULSS 0.5, ADDSS/SUBSS 3.0, then
+        // MULSS 0.125.  Keep these steps in scalar single precision and scan
+        // both height grids.
+#if defined(_MSC_VER) && defined(_M_IX86)
+        const __m128 halfXv = _mm_mul_ss(_mm_set_ss(vid->sizeXYZ.x), _mm_set_ss(0.5f));
+        const __m128 halfYv = _mm_mul_ss(_mm_set_ss(vid->sizeXYZ.y), _mm_set_ss(0.5f));
+        const float halfX = _mm_cvtss_f32(halfXv);
+        const float halfY = _mm_cvtss_f32(halfYv);
+        const float minXRaw = _mm_cvtss_f32(_mm_sub_ss(
+            _mm_set_ss(v.x), _mm_sub_ss(_mm_set_ss(halfX), _mm_set_ss(3.0f))));
+        const float minYRaw = _mm_cvtss_f32(_mm_sub_ss(
+            _mm_set_ss(v.y), _mm_sub_ss(_mm_set_ss(halfY), _mm_set_ss(3.0f))));
+        const float maxXRaw = _mm_cvtss_f32(_mm_sub_ss(
+            _mm_add_ss(_mm_set_ss(v.x), _mm_set_ss(halfX)), _mm_set_ss(3.0f)));
+        const float maxYRaw = _mm_cvtss_f32(_mm_sub_ss(
+            _mm_add_ss(_mm_set_ss(v.y), _mm_set_ss(halfY)), _mm_set_ss(3.0f)));
+#else
+        const float halfX = vid->sizeXYZ.x * 0.5f;
+        const float halfY = vid->sizeXYZ.y * 0.5f;
+        const float minXRaw = v.x - (halfX - 3.0f);
+        const float minYRaw = v.y - (halfY - 3.0f);
+        const float maxXRaw = (v.x + halfX) - 3.0f;
+        const float maxYRaw = (v.y + halfY) - 3.0f;
+#endif
 
-        const auto scaledGridCoordinate = [](float value, float limit) noexcept -> long double
+        const auto scaledGridCoordinate = [](float value, float limit) noexcept -> float
         {
-            if (x87LessOrUnorderedForMap(value, 0.0f))
-                return 0.0L;
-            if (x87LessOrUnorderedForMap(value, limit))
-                return static_cast<long double>(value) * 0.125L;
-            return (static_cast<long double>(limit) - 1.0L) * 0.125L;
+            // COMISS 0,value clamps only ordered negatives.  Unordered falls
+            // through; the following COMISS/JB then keeps the source value.
+            if (value < 0.0f)
+                return 0.0f;
+
+            float chosen = value;
+            if (value >= limit)
+            {
+#if defined(_MSC_VER) && defined(_M_IX86)
+                chosen = _mm_cvtss_f32(
+                    _mm_sub_ss(_mm_set_ss(limit), _mm_set_ss(1.0f)));
+#else
+                chosen = limit - 1.0f;
+#endif
+            }
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtss_f32(
+                _mm_mul_ss(_mm_set_ss(chosen), _mm_set_ss(0.125f)));
+#else
+            return chosen * 0.125f;
+#endif
         };
 
-        const long double minX = scaledGridCoordinate(minXRaw, mapSizeX);
-        const long double minY = scaledGridCoordinate(minYRaw, mapSizeY);
-        const long double maxX = scaledGridCoordinate(maxXRaw, mapSizeX);
-        const long double maxY = scaledGridCoordinate(maxYRaw, mapSizeY);
+        const float minX = scaledGridCoordinate(minXRaw, mapSizeX);
+        const float minY = scaledGridCoordinate(minYRaw, mapSizeY);
+        const float maxX = scaledGridCoordinate(maxXRaw, mapSizeX);
+        const float maxY = scaledGridCoordinate(maxYRaw, mapSizeY);
 
         std::int32_t result = -16383;
-        if (minY > maxY)
+        // COMISS maxY,minY / JB: ordered maxY<minY and unordered both exit.
+        if (!(maxY >= minY))
             return static_cast<float>(result);
 
-        const short* const grid = terrainGrid();
+        const short* const permanent = terrainGrid();
+#ifdef _WIN32
+        const short* const temporary = core::ApplicationTempTerrainGrid();
+#else
+        const std::size_t cells = static_cast<std::size_t>(terrainGridWidth()) *
+                                  static_cast<std::size_t>(terrainGridHeight());
+        const std::vector<short>& tempStorage = tempTerrainGridFor(this, cells);
+        const short* const temporary = tempStorage.empty() ? nullptr : tempStorage.data();
+#endif
         const std::int32_t gridX = terrainGridWidth();
-        long double scanY = minY;
+
+        float scanY = minY;
         for (;;)
         {
-            if (minX <= maxX)
+            // COMISS maxX,minX / JB skips an inverted or unordered row.
+            if (maxX >= minX)
             {
-                const std::int32_t gy = static_cast<std::int32_t>(std::trunc(scanY));
+                const std::int32_t gy = truncateFloatToInt32ForMap(scanY);
                 const std::int32_t row = static_cast<std::int32_t>(
-                    static_cast<std::uint32_t>(gy) *
-                    static_cast<std::uint32_t>(gridX));
+                    static_cast<std::uint32_t>(gy) * static_cast<std::uint32_t>(gridX));
 
-                long double scanX = minX;
+                float scanX = minX;
                 for (;;)
                 {
-                    const std::int32_t gx = static_cast<std::int32_t>(std::trunc(scanX));
+                    const std::int32_t gx = truncateFloatToInt32ForMap(scanX);
                     const std::int32_t index = static_cast<std::int32_t>(
-                        static_cast<std::uint32_t>(row) +
-                        static_cast<std::uint32_t>(gx));
-                    const std::int32_t z = static_cast<std::int16_t>(grid[index]);
-                    if (z > result)
-                        result = z;
+                        static_cast<std::uint32_t>(row) + static_cast<std::uint32_t>(gx));
 
-                    scanX += 1.0L;
-                    if (scanX > maxX)
+                    if (permanent)
+                    {
+                        const std::int32_t z = static_cast<std::int16_t>(permanent[index]);
+                        if (z > result)
+                            result = z;
+                    }
+                    if (temporary)
+                    {
+                        const std::int32_t z = static_cast<std::int16_t>(temporary[index]);
+                        if (z > result)
+                            result = z;
+                    }
+
+#if defined(_MSC_VER) && defined(_M_IX86)
+                    scanX = _mm_cvtss_f32(
+                        _mm_add_ss(_mm_set_ss(scanX), _mm_set_ss(1.0f)));
+#else
+                    scanX += 1.0f;
+#endif
+                    if (!(maxX >= scanX))
                         break;
                 }
             }
 
-            scanY += 1.0L;
-            if (scanY > maxY)
+#if defined(_MSC_VER) && defined(_M_IX86)
+            scanY = _mm_cvtss_f32(
+                _mm_add_ss(_mm_set_ss(scanY), _mm_set_ss(1.0f)));
+#else
+            scanY += 1.0f;
+#endif
+            if (!(maxY >= scanY))
                 break;
         }
 
@@ -3743,11 +3769,11 @@ namespace as1
         const GamePath lgcPath = resolveGameFile(requestedLgc);
         GamePath chosenPath = lgcPath;
         const STRING lgcResolved(gamePathString(lgcPath));
-        if (FileDataFileExists(lgcResolved) == 0)
+        if (FileDataFileExist(lgcResolved) == 0)
         {
             const GamePath lgdPath = resolveGameFile(requestedLgd);
             const STRING lgdResolved(gamePathString(lgdPath));
-            if (FileDataFileExists(lgdResolved) != 0)
+            if (FileDataFileExist(lgdResolved) != 0)
                 chosenPath = lgdPath;
         }
 

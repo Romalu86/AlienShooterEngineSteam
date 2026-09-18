@@ -223,8 +223,6 @@ namespace as1 { namespace core
         void setScrollMaxYLimit(float value) noexcept;
         float cameraShiftX() const noexcept;
         float cameraShiftY() const noexcept;
-        double cameraRelativeX(float value) const noexcept;
-        double cameraRelativeY(float value) const noexcept;
         void setCameraShiftX(float value) noexcept;
         void setCameraShiftY(float value) noexcept;
         ApplicationDrawPassBucket& drawPassBucket(int pass) noexcept;

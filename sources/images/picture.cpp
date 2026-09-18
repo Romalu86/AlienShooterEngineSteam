@@ -1628,7 +1628,7 @@ namespace as1 { namespace images
                 if (m_flags & 0x04u)
                 {
                     const WORD aux = composeAuxWord(x, y);
-                    as1::UpdateCrc32(crc, &aux, 2);
+                    as1::UpdateCrc3232(crc, &aux, 2);
                 }
 
                 DWORD converted = 0;
@@ -1643,7 +1643,7 @@ namespace as1 { namespace images
                     converted = convertPixelByFlags(x, y);
                 }
                 const WORD packed = static_cast<WORD>(converted & 0xFFFFu);
-                as1::UpdateCrc32(crc, &packed, 2);
+                as1::UpdateCrc3232(crc, &packed, 2);
             }
         }
         return static_cast<int>(crc);

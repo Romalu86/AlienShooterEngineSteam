@@ -222,6 +222,17 @@ namespace as1
 #endif
     }
 
+    void MOUSE::Draw()
+    {
+        // Steam 1.22 sub_4436B0: software cursor is drawn only while
+        // hardware mode is disabled and cursor resources are active.
+        if (m_hardwareCursorEnabled == 0 && m_cursorHandlesLoaded != 0)
+        {
+            VID* const vid = Vid();
+            vid->Draw(this);
+        }
+    }
+
     int MOUSE::Action(int opcode, std::intptr_t rawVar1, int rawVar2, int rawVar3)
     {
         if (opcode == 0x3D)

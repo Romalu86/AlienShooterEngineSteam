@@ -10,6 +10,7 @@
 #include <new>
 #include <cmath>
 #include <cstring>
+#include <string>
 #include <xmmintrin.h>
 
 #include "sprite.h"
@@ -66,6 +67,12 @@ namespace as1 { namespace win
 
         std::uint32_t g_presentationVersionLastSpawnMs = 0u;
 
+        void applicationSaveOptionsInt(const char* path, int value)
+        {
+            const std::string text = std::to_string(value);
+            as1::FSaveData(as1::STRING(path), as1::STRING(text.c_str()));
+        }
+
         bool retailDebugModeEnabled() noexcept
         {
             const as1::BASE_CONSTANTS* const constants = as1::GlobalBaseConstants();
@@ -77,7 +84,6 @@ namespace as1 { namespace win
         constexpr float kCameraEdgeThreshold = 5.0f;
         constexpr float kCameraAccelerationX = 0.039999999f;
         constexpr float kCameraAccelerationY = 0.029999999f;
-        constexpr float kCameraTargetFollowScale = 0.001f;
         constexpr float kCameraPointerFollowScale = -0.0040000002f;
 
         float dwordAsFloat(std::uint32_t value) noexcept
@@ -87,19 +93,18 @@ namespace as1 { namespace win
             return out;
         }
 
-        bool cameraLessOrUnordered(float lhs, float rhs) noexcept
+        bool cameraOrderedLess(float lhs, float rhs) noexcept
         {
-            return std::isnan(lhs) || std::isnan(rhs) || lhs < rhs;
+            // sub_4387D0 uses COMISS branches whose acceleration paths are
+            // entered only for ordered '<'.  Unordered must not move the camera.
+            return lhs < rhs;
         }
 
-        bool cameraLessEqualOrUnordered(float lhs, float rhs) noexcept
+        bool cameraOrderedLessEqual(float lhs, float rhs) noexcept
         {
-            return std::isnan(lhs) || std::isnan(rhs) || lhs <= rhs;
-        }
-
-        bool cameraEqualOrUnordered(float lhs, float rhs) noexcept
-        {
-            return std::isnan(lhs) || std::isnan(rhs) || lhs == rhs;
+            // The edge test is ordered <=.  COMISS routes unordered to the
+            // keyboard/no-scroll path rather than treating NaN as an edge hit.
+            return lhs <= rhs;
         }
 
         float cameraRetailMinss(float destination, float source) noexcept
@@ -110,20 +115,59 @@ namespace as1 { namespace win
             return destination < source ? destination : source;
         }
 
+        float cameraRetailSubss(float lhs, float rhs) noexcept
+        {
+            // sub_4387D0 observes each SUBSS rounding point.  Keep the
+            // intermediate in binary32 instead of allowing algebraic
+            // cancellation or x87 extended precision in the Win32 build.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtss_f32(_mm_sub_ss(_mm_set_ss(lhs), _mm_set_ss(rhs)));
+#else
+            volatile float rounded = lhs - rhs;
+            return rounded;
+#endif
+        }
+
+        float cameraRetailAddss(float lhs, float rhs) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtss_f32(_mm_add_ss(_mm_set_ss(lhs), _mm_set_ss(rhs)));
+#else
+            volatile float rounded = lhs + rhs;
+            return rounded;
+#endif
+        }
+
         std::int32_t convertCameraElapsedScaleToInt32(std::uint32_t elapsed, float scale) noexcept
         {
-            // The game logic converts the unsigned elapsed value to double only
-            // as an implementation detail, immediately narrows it to float, then
-            // performs single-precision multiplication and truncating float-to-int conversion.  Keep the observable arithmetic binary32.
-            const float value = static_cast<float>(elapsed) * scale;
-            if (!std::isfinite(value) || value < -2147483648.0f || value >= 2147483648.0f)
+            // sub_4387D0: unsigned delta -> binary32, MULSS, CVTTSS2SI.
+            // Preserve integer-indefinite for NaN/overflow instead of letting a
+            // host cast choose implementation-defined behaviour.
+            const float elapsedF32 = static_cast<float>(elapsed);
+#if defined(_MSC_VER) && defined(_M_IX86)
+            const __m128 scaled = _mm_mul_ss(_mm_set_ss(elapsedF32), _mm_set_ss(scale));
+            return _mm_cvtt_ss2si(scaled);
+#else
+            const float value = elapsedF32 * scale;
+            if (!(value >= -2147483648.0f && value < 2147483648.0f))
                 return static_cast<std::int32_t>(0x80000000u);
             return static_cast<std::int32_t>(value);
+#endif
         }
 
         int retailTerrainGridDimension(float extent) noexcept
         {
-            const int raw = static_cast<int>(extent + 7.0f);
+            // sub_43EFC0: ADDSS 7.0 -> CVTTSS2SI, then signed /8 rounded
+            // toward zero via CDQ/AND/ADD/SAR.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            const __m128 expanded = _mm_add_ss(_mm_set_ss(extent), _mm_set_ss(7.0f));
+            const int raw = _mm_cvtt_ss2si(expanded);
+#else
+            const float expanded = extent + 7.0f;
+            const int raw = (!(expanded >= -2147483648.0f && expanded < 2147483648.0f))
+                ? static_cast<int>(0x80000000u)
+                : static_cast<int>(expanded);
+#endif
             return (raw + (raw < 0 ? 7 : 0)) >> 3;
         }
 
@@ -1564,10 +1608,11 @@ namespace as1 { namespace win
             {
                 RECT rect;
                 ::GetWindowRect(mainWindowHandle(this), &rect);
-                as1::STRING nameX("WindowPositionX");
-                as1::core::StartupRegistryPath().WriteRegistryInt(nameX, rect.left);
-                as1::STRING nameY("WindowPositionY");
-                as1::core::StartupRegistryPath().WriteRegistryInt(nameY, rect.top);
+                // Steam 0x440347..0x44039B writes these values through the
+                // options profile object (0x4F8000), producing the empty []
+                // section used by the retail options.ini.
+                applicationSaveOptionsInt("options://WindowPositionX", rect.left);
+                applicationSaveOptionsInt("options://WindowPositionY", rect.top);
             }
             mainWindowHandle(this) = nullptr;
             ::PostQuitMessage(0);
@@ -2680,9 +2725,6 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
         const float maxY = dwordAsFloat(constants->raw[1]);
         const float graphWidth = graph->screenWidth();
         const float graphHeight = graph->screenHeight();
-        const auto& viewport = graph->viewportState();
-        const float graphRight = viewport.right;
-        const float graphBottom = viewport.bottom;
 
         const as1::core::ApplicationDrawDispatcherState& appDraw =
             as1::core::GlobalApplicationDrawDispatcherState();
@@ -2698,78 +2740,52 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
 
         if ((mode & 0x21u) != 0)
         {
-            if (cameraLessEqualOrUnordered(clientX, kCameraEdgeThreshold) && (mode & 0x01u) != 0)
+            const bool edgeScroll = (mode & 0x01u) != 0;
+            const bool keyScroll = (mode & 0x20u) != 0;
+
+            if (edgeScroll && cameraOrderedLessEqual(clientX, kCameraEdgeThreshold))
             {
-                if (cameraLessOrUnordered(-maxX, velocityX))
+                if (cameraOrderedLess(-maxX, velocityX))
                     velocityX -= kCameraAccelerationX;
             }
-            else if ((graphRight - kCameraEdgeThreshold) > clientX && (mode & 0x01u) != 0)
+            else if (edgeScroll && clientX >= (graphWidth - kCameraEdgeThreshold))
             {
-
-                if ((inputFlags & 0x80u) != 0 && (mode & 0x20u) != 0)
-                {
-                    if (cameraLessOrUnordered(-maxX, velocityX))
-                        velocityX -= kCameraAccelerationX;
-                }
-                else if ((inputFlags & 0x0100u) != 0 && (mode & 0x20u) != 0)
-                {
-                    if (cameraLessOrUnordered(velocityX, maxX))
-                        velocityX += kCameraAccelerationX;
-                }
-                else
-                    velocityX = 0.0f;
-            }
-            else if ((mode & 0x01u) != 0)
-            {
-                if (cameraLessOrUnordered(velocityX, maxX))
+                // COMISS clientX,rightEdge / JB routes unordered away from the
+                // edge branch, so plain ordered >= is the exact condition.
+                if (cameraOrderedLess(velocityX, maxX))
                     velocityX += kCameraAccelerationX;
             }
-            else if ((inputFlags & 0x80u) != 0 && (mode & 0x20u) != 0)
+            else if ((inputFlags & 0x80u) != 0 && keyScroll)
             {
-                if (cameraLessOrUnordered(-maxX, velocityX))
+                if (cameraOrderedLess(-maxX, velocityX))
                     velocityX -= kCameraAccelerationX;
             }
-            else if ((inputFlags & 0x0100u) != 0 && (mode & 0x20u) != 0)
+            else if ((inputFlags & 0x0100u) != 0 && keyScroll)
             {
-                if (cameraLessOrUnordered(velocityX, maxX))
+                if (cameraOrderedLess(velocityX, maxX))
                     velocityX += kCameraAccelerationX;
             }
             else
                 velocityX = 0.0f;
 
-            if (cameraLessEqualOrUnordered(clientY, kCameraEdgeThreshold) && (mode & 0x01u) != 0)
+            if (edgeScroll && cameraOrderedLessEqual(clientY, kCameraEdgeThreshold))
             {
-                if (cameraLessOrUnordered(-maxY, velocityY))
+                if (cameraOrderedLess(-maxY, velocityY))
                     velocityY -= kCameraAccelerationY;
             }
-            else if ((graphBottom - kCameraEdgeThreshold) > clientY && (mode & 0x01u) != 0)
+            else if (edgeScroll && clientY >= (graphHeight - kCameraEdgeThreshold))
             {
-                if ((inputFlags & 0x0400u) != 0 && (mode & 0x20u) != 0)
-                {
-                    if (cameraLessOrUnordered(-maxY, velocityY))
-                        velocityY -= kCameraAccelerationY;
-                }
-                else if ((inputFlags & 0x0200u) != 0 && (mode & 0x20u) != 0)
-                {
-                    if (cameraLessOrUnordered(velocityY, maxY))
-                        velocityY += kCameraAccelerationY;
-                }
-                else
-                    velocityY = 0.0f;
-            }
-            else if ((mode & 0x01u) != 0)
-            {
-                if (cameraLessOrUnordered(velocityY, maxY))
+                if (cameraOrderedLess(velocityY, maxY))
                     velocityY += kCameraAccelerationY;
             }
-            else if ((inputFlags & 0x0400u) != 0 && (mode & 0x20u) != 0)
+            else if ((inputFlags & 0x0400u) != 0 && keyScroll)
             {
-                if (cameraLessOrUnordered(-maxY, velocityY))
+                if (cameraOrderedLess(-maxY, velocityY))
                     velocityY -= kCameraAccelerationY;
             }
-            else if ((inputFlags & 0x0200u) != 0 && (mode & 0x20u) != 0)
+            else if ((inputFlags & 0x0200u) != 0 && keyScroll)
             {
-                if (cameraLessOrUnordered(velocityY, maxY))
+                if (cameraOrderedLess(velocityY, maxY))
                     velocityY += kCameraAccelerationY;
             }
             else
@@ -2824,9 +2840,18 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
         }
         else if (target && (mode & 0x10u) != 0 && noVelocity)
         {
-            map->SetShiftCoor(target->X(),
-                              target->Y() - target->Z(),
-                              0);
+            // Steam 1.22 does not algebraically cancel the camera carrier
+            // offsets here.  sub_4387D0 executes SUBSS/SUBSS/ADDSS and passes
+            // the rounded intermediates to MAP::SetPosition.  This matters for
+            // large coordinates and NaN/Inf edge cases.
+            const float centerX = cameraRetailAddss(
+                cameraRetailSubss(target->X(), cameraShiftX),
+                cameraShiftX);
+            const float targetGroundY = cameraRetailSubss(target->Y(), target->Z());
+            const float centerY = cameraRetailAddss(
+                cameraRetailSubss(targetGroundY, cameraShiftY),
+                cameraShiftY);
+            map->SetPosition(centerX, centerY, 0);
             return;
         }
 
@@ -2841,7 +2866,7 @@ bool ApplicationWin::shouldWaitForMessage() const noexcept
         float centerY = graphHeight * 0.5f;
         centerY += cameraShiftY;
         centerY += static_cast<float>(dy);
-        map->SetShiftCoor(centerX, centerY, 0);
+        map->SetPosition(centerX, centerY, 0);
     }
 
     void ApplicationWin::dispatchStartupPlayerControls()
