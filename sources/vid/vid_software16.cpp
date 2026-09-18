@@ -31,6 +31,12 @@ namespace as1
 #endif
         }
 
+        int retailWrapAddSoftware16(int lhs, int rhs) noexcept
+        {
+            return static_cast<std::int32_t>(static_cast<std::uint32_t>(lhs) +
+                                             static_cast<std::uint32_t>(rhs));
+        }
+
         int retailWrapSubSoftware16(int lhs, int rhs) noexcept
         {
             return static_cast<int>(static_cast<std::uint32_t>(lhs) - static_cast<std::uint32_t>(rhs));
@@ -296,15 +302,15 @@ namespace as1
             drawTop + sizeY < clipTop || drawTop >= clipBottom)
             return;
 
-        int baseDepth = static_cast<int>(sprite->Z() * 8.0f);
+        int baseDepth = truncateFloatToInt32Software16(sprite->Z() * 8.0f);
         if ((property & P_ALWAYSTOP) != 0u && baseDepth < 0x3FFF)
-            baseDepth += 0x3FFF;
+            baseDepth = retailWrapAddSoftware16(baseDepth, 0x3FFF);
         else if ((property & P_WAVE) != 0u)
         {
-            const int waveDepth = static_cast<int>(
+            const int waveDepth = truncateFloatToInt32Software16(
                 SPRITE::rawDirectionSin(static_cast<int>((core::CurrentTimeMilliseconds() >> 3u) & 0xFFu)) *
                 moveUpZ() * 8.0f);
-            baseDepth += waveDepth;
+            baseDepth = retailWrapAddSoftware16(baseDepth, waveDepth);
             drawTop += waveDepth / -8;
         }
 
@@ -530,15 +536,15 @@ namespace as1
             drawTop + sizeY < clipTop || drawTop >= clipBottom)
             return;
 
-        int baseDepth = static_cast<int>(sprite->Z() * 8.0f);
+        int baseDepth = truncateFloatToInt32Software16(sprite->Z() * 8.0f);
         if ((property & P_ALWAYSTOP) != 0u && baseDepth < 0x3FFF)
-            baseDepth += 0x3FFF;
+            baseDepth = retailWrapAddSoftware16(baseDepth, 0x3FFF);
         else if ((property & P_WAVE) != 0u)
         {
-            const int waveDepth = static_cast<int>(
+            const int waveDepth = truncateFloatToInt32Software16(
                 SPRITE::rawDirectionSin(static_cast<int>((core::CurrentTimeMilliseconds() >> 3u) & 0xFFu)) *
                 moveUpZ() * 8.0f);
-            baseDepth += waveDepth;
+            baseDepth = retailWrapAddSoftware16(baseDepth, waveDepth);
             drawTop += waveDepth / -8;
         }
 

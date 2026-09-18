@@ -3,6 +3,9 @@
 #include <cstdint>
 #include <cstddef>
 #include <cmath>
+#if defined(_MSC_VER) && defined(_M_IX86)
+#include <xmmintrin.h>
+#endif
 
 namespace as1
 {
@@ -30,6 +33,20 @@ namespace as1
         std::int32_t neg32Wrap(std::int32_t value) noexcept
         {
             return static_cast<std::int32_t>(0u - static_cast<std::uint32_t>(value));
+        }
+
+        unsigned char retailCvttss2siLowByte(float value) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return static_cast<unsigned char>(_mm_cvtt_ss2si(_mm_set_ss(value)));
+#else
+            // Steam sub_445600 finishes with CVTTSS2SI and stores CL.  For
+            // unordered or out-of-range input the x86 instruction returns
+            // integer-indefinite (0x80000000), whose low byte is zero.
+            if (!(value >= -2147483648.0f && value < 2147483648.0f))
+                return 0u;
+            return static_cast<unsigned char>(static_cast<int>(value));
+#endif
         }
     }
 
@@ -92,6 +109,10 @@ namespace as1
 
     ANGLE RetailDirectionFromFloatXY(float x, float y) noexcept
     {
+        // Steam 1.22 sub_445600.  Keep the original unordered branches:
+        // UCOMISS treats NaN as the non-zero path; COMISS/JBE maps NaN x to
+        // the 0xC0 zero-y branch; and for y < 0 an unordered x follows the
+        // +256 path.
         if (y == 0.0f)
         {
             if (x == 0.0f)
@@ -101,18 +122,22 @@ namespace as1
             return ANGLE(0xC0u);
         }
 
-        float angle = static_cast<float>(std::atan(static_cast<double>(-(x / y)))) * 40.743668f;
-        if (y < 0.0f)
+        const float ratio = x / y;
+        float angle = static_cast<float>(std::atan(static_cast<double>(-ratio)));
+        angle = angle * 40.743668f;
+
+        // COMISS 0,y / JBE: y >= 0 OR unordered -> +128.
+        if (!(y < 0.0f))
         {
-            if (x < 0.0f)
-                angle += 256.0f;
+            angle = angle + 128.0f;
         }
-        else
+        // COMISS x,0 / JNB: only ordered x >= 0 skips +256.
+        else if (!(x >= 0.0f))
         {
-            angle += 128.0f;
+            angle = angle + 256.0f;
         }
 
-        return ANGLE(static_cast<unsigned char>(static_cast<int>(angle)));
+        return ANGLE(retailCvttss2siLowByte(angle));
     }
 
     int IntegerSquareRoot(int value)

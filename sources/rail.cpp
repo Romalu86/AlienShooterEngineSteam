@@ -273,10 +273,6 @@ namespace as1
         return dispatchRailActionOpcode(opcode, argument1, argument2, argument3);
     }
 
-    void RAIL::MoveTact()
-    {
-        performBaseMovementTact();
-    }
 
     int RAIL::dispatchRailActionOpcode(int opcode, int actionArgument1, float actionArgument2, int actionArgument3)
     {

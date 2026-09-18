@@ -17,6 +17,7 @@
 #include "images/picture.h"
 #include "core/log.h"
 #include "core/file_logger.h"
+#include "file_data.h"
 #include <algorithm>
 #include <cmath>
 #include <limits>
@@ -32,6 +33,7 @@
 #include <cstdlib>
 #if defined(_MSC_VER) && defined(_M_IX86)
 #include <xmmintrin.h>
+#include <emmintrin.h>
 #endif
 #include <sstream>
 #include <unordered_map>
@@ -56,6 +58,21 @@
 namespace as1
 {
     int graphConvertFloatToInt32(float value) noexcept;
+
+    namespace
+    {
+        void graphSaveOptionsInt(const char* path, int value)
+        {
+            const std::string text = std::to_string(value);
+            FSaveData(STRING(path), STRING(text.c_str()));
+        }
+
+        int graphLoadOptionsInt(const char* path, int defaultValue)
+        {
+            const std::string defaultText = std::to_string(defaultValue);
+            return std::atoi(FLoadData(STRING(path), STRING(defaultText.c_str())).c_str());
+        }
+    }
 
 #if !defined(_MSC_VER) || !defined(_M_IX86)
     struct GraphHostState
@@ -619,6 +636,58 @@ namespace as1
 #endif
     }
 
+    namespace
+    {
+        int graphFtolInt64Low32(float value) noexcept
+        {
+            // sub_4312D0 calls retail helper sub_47D1A0 for the D3DVIEWPORT8
+            // fields.  The caller keeps EAX only (the low DWORD of the int64).
+            const double widened = static_cast<double>(value);
+            if (!std::isfinite(widened) ||
+                widened >= 9223372036854775808.0 ||
+                widened < -9223372036854775808.0)
+            {
+                // sub_47D1A0 returns INT64_MIN for invalid input; low DWORD = 0.
+                return 0;
+            }
+            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(widened));
+            return static_cast<std::int32_t>(static_cast<std::uint32_t>(converted));
+        }
+
+        float graphRetailSubss(float lhs, float rhs) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtss_f32(_mm_sub_ss(_mm_set_ss(lhs), _mm_set_ss(rhs)));
+#else
+            volatile float rounded = lhs - rhs;
+            return rounded;
+#endif
+        }
+
+        float graphRetailUnsignedDwordToFloat(std::uint32_t value) noexcept
+        {
+            // Retail expands the signed dword with CVTDQ2PD, conditionally adds
+            // 2^32 for the sign bit, then rounds back with CVTPD2PS.
+            const double widened = static_cast<double>(value);
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtss_f32(_mm_cvtsd_ss(_mm_setzero_ps(), _mm_set_sd(widened)));
+#else
+            volatile float rounded = static_cast<float>(widened);
+            return rounded;
+#endif
+        }
+
+        float graphRetailDivss(float lhs, float rhs) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtss_f32(_mm_div_ss(_mm_set_ss(lhs), _mm_set_ss(rhs)));
+#else
+            volatile float rounded = lhs / rhs;
+            return rounded;
+#endif
+        }
+    }
+
     bool graphRetailFcompC3Equal(float lhs, float rhs) noexcept
     {
 
@@ -826,17 +895,19 @@ namespace as1
 
         bool draw(float x, float y, DWORD color, const char* text, DWORD flags, std::string* status)
         {
+            (void)status;
             if (!m_device)
                 return false;
-            if (m_savedStateBlock)
-                m_savedStateBlock->Capture();
-            if (m_textStateBlock)
-                m_textStateBlock->Apply();
+
+            // Steam 1.22 ASM (0x41B710): the recorded state blocks are assumed
+            // to exist. Capture the caller state, apply the text state, and do
+            // not add any texture/state writes outside the recorded text block.
+            m_savedStateBlock->Capture();
+            m_textStateBlock->Apply();
 
             m_device->SetFVF(kTextVertexFVF);
             m_device->SetPixelShader(nullptr);
             m_device->SetStreamSource(0, m_vertexBuffer, 0u, kTextVertexStride);
-            m_device->SetTexture(0, m_texture);
             if ((flags & 4u) != 0)
             {
                 m_device->SetSamplerState(0, D3DSAMP_MINFILTER, D3DTEXF_LINEAR);
@@ -844,18 +915,11 @@ namespace as1
             }
 
             void* raw = nullptr;
-            HRESULT hr = m_vertexBuffer->Lock(0, 0, &raw, kTextVertexLockFlags);
-            if (FAILED(hr) || !raw)
-            {
-                if (status)
-                    *status = hresultText("font vertex lock", hr);
-                return false;
-            }
+            (void)m_vertexBuffer->Lock(0, 0, &raw, kTextVertexLockFlags);
 
             GraphTextVertex* vertices = reinterpret_cast<GraphTextVertex*>(raw);
             UINT primitiveCount = 0;
             UINT vertexCount = 0;
-            bool ok = true;
             float cursorX = x;
             float cursorY = y;
             const float lineStep = (m_glyphs[0].bottom - m_glyphs[0].top) * static_cast<float>(m_textureHeight);
@@ -896,23 +960,13 @@ namespace as1
                 std::copy(quad, quad + 6, vertices + vertexCount);
                 vertexCount += 6u;
                 primitiveCount += 2u;
+
                 if (primitiveCount > 98u)
                 {
-                    hr = flush(primitiveCount, status);
-                    if (FAILED(hr))
-                    {
-                        ok = false;
-                        break;
-                    }
+                    (void)m_vertexBuffer->Unlock();
+                    (void)m_device->DrawPrimitive(D3DPT_TRIANGLELIST, 0, primitiveCount);
                     raw = nullptr;
-                    hr = m_vertexBuffer->Lock(0, 0, &raw, kTextVertexLockFlags);
-                    if (FAILED(hr) || !raw)
-                    {
-                        if (status)
-                            *status = hresultText("font vertex lock", hr);
-                        ok = false;
-                        break;
-                    }
+                    (void)m_vertexBuffer->Lock(0, 0, &raw, kTextVertexLockFlags);
                     vertices = reinterpret_cast<GraphTextVertex*>(raw);
                     primitiveCount = 0;
                     vertexCount = 0;
@@ -920,27 +974,12 @@ namespace as1
                 cursorX += glyphW;
             }
 
-            HRESULT unlockHr = m_vertexBuffer->Unlock();
-            if (FAILED(unlockHr) && ok)
-            {
-                if (status)
-                    *status = hresultText("font vertex unlock", unlockHr);
-                ok = false;
-            }
-            if (ok && primitiveCount > 0)
-            {
-                hr = m_device->DrawPrimitive(D3DPT_TRIANGLELIST, 0, primitiveCount);
-                if (FAILED(hr))
-                {
-                    if (status)
-                        *status = hresultText("font draw", hr);
-                    ok = false;
-                }
-            }
+            (void)m_vertexBuffer->Unlock();
+            if (primitiveCount != 0u)
+                (void)m_device->DrawPrimitive(D3DPT_TRIANGLELIST, 0, primitiveCount);
 
-            if (m_savedStateBlock)
-                m_savedStateBlock->Apply();
-            return ok;
+            m_savedStateBlock->Apply();
+            return true;
         }
 #endif
 
@@ -1097,7 +1136,6 @@ namespace as1
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(22), 3u);
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(52), 0u);
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(136), 1u);
-            m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(40), 0u);
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(152), 0u);
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(151), 0u);
             m_device->SetRenderState(static_cast<D3DRENDERSTATETYPE>(167), 0u);
@@ -2925,7 +2963,7 @@ namespace as1
             g_frameCameraShiftY = appDraw.cameraShiftY();
             const int jitterY = std::rand() % 9;
             const int jitterX = std::rand() % 9;
-            map.SetShiftCoor(
+            map.SetPosition(
                 g_frameCameraShiftX + static_cast<float>(m_sizeX) * 0.5f + 4.0f - static_cast<float>(jitterX),
                 g_frameCameraShiftY + static_cast<float>(m_sizeY) * 0.5f + 4.0f - static_cast<float>(jitterY),
                 0);
@@ -3026,7 +3064,7 @@ namespace as1
         if ((m_renderFlags & 4u) != 0u &&
             (core::ApplicationFlags() & application_flags::BucketTimingActive) == 0u)
         {
-            map.SetShiftCoor(
+            map.SetPosition(
                 g_frameCameraShiftX + static_cast<float>(m_sizeX) * 0.5f,
                 g_frameCameraShiftY + static_cast<float>(m_sizeY) * 0.5f,
                 0);
@@ -3710,10 +3748,15 @@ namespace as1
             return result;
 
         D3DVIEWPORT8 viewport{};
-        viewport.X = static_cast<DWORD>(graphConvertFloatToInt32(left));
-        viewport.Y = static_cast<DWORD>(graphConvertFloatToInt32(top));
-        viewport.Width = static_cast<DWORD>(graphConvertFloatToInt32(right - left));
-        viewport.Height = static_cast<DWORD>(graphConvertFloatToInt32(bottom - top));
+        // sub_4312D0 intentionally does NOT reuse the CVTTSS2SI clip values above.
+        // It performs SUBSS for the extents and feeds all four viewport values to
+        // sub_47D1A0, keeping the helper's low DWORD.
+        const float viewportWidth = graphRetailSubss(right, left);
+        const float viewportHeight = graphRetailSubss(bottom, top);
+        viewport.X = static_cast<DWORD>(graphFtolInt64Low32(left));
+        viewport.Y = static_cast<DWORD>(graphFtolInt64Low32(top));
+        viewport.Width = static_cast<DWORD>(graphFtolInt64Low32(viewportWidth));
+        viewport.Height = static_cast<DWORD>(graphFtolInt64Low32(viewportHeight));
         viewport.MinZ = 0.0f;
         viewport.MaxZ = 1.0f;
 
@@ -3728,9 +3771,13 @@ namespace as1
         // Retail does not raise ResourceError for SetViewport here; it logs the HRESULT
         // result and proceeds to the projection transform.
         D3DMATRIX matrix{};
-        matrix._11 = 2.0f / static_cast<float>(static_cast<std::int32_t>(viewport.Width));
-        matrix._22 = -2.0f / static_cast<float>(static_cast<std::int32_t>(viewport.Height));
-        matrix._33 = (1.0f / (viewport.MaxZ - viewport.MinZ)) * 0.0049999999f;
+        const float viewportWidthAsFloat = graphRetailUnsignedDwordToFloat(viewport.Width);
+        const float viewportHeightAsFloat = graphRetailUnsignedDwordToFloat(viewport.Height);
+        matrix._11 = graphRetailDivss(2.0f, viewportWidthAsFloat);
+        matrix._22 = graphRetailDivss(-2.0f, viewportHeightAsFloat);
+        matrix._33 = graphRetailDivss(
+            graphRetailDivss(1.0f, graphRetailSubss(viewport.MaxZ, viewport.MinZ)),
+            200.0f);
         matrix._44 = 1.0f;
 
         result = static_cast<int>(device->SetTransform(D3DTS_PROJECTION, &matrix));
@@ -3941,22 +3988,27 @@ namespace as1
 #ifdef _WIN32
 
         core::SetRealTimeMilliseconds(::timeGetTime());
-        const STRING& registry = core::StartupRegistryPath();
-        registry.WriteRegistryInt(STRING("ScreenX"), static_cast<int>(m_sizeX));
-        registry.WriteRegistryInt(STRING("ScreenY"), static_cast<int>(m_sizeY));
+        // Steam sub_42A920 writes the selected display mode through the
+        // options-profile object (0x4F8000): graph\ScreenX, graph\ScreenY,
+        // graph\BPP, graph\Device and graph\FullScreen.
+        graphSaveOptionsInt("options://graph/ScreenX", graphConvertFloatToInt32(m_sizeX));
+        graphSaveOptionsInt("options://graph/ScreenY", graphConvertFloatToInt32(m_sizeY));
+        graphSaveOptionsInt("options://graph/BPP", (m_graphFlags & 0x2u) != 0u ? 32 : 16);
+        graphSaveOptionsInt("options://graph/Device", m_selectedAdapterIndex);
+        graphSaveOptionsInt("options://graph/FullScreen", fullscreenRequested() ? 1 : 0);
 
-        registry.WriteRegistryInt(STRING("BPP"), (m_graphFlags & 0x2u) != 0u ? 32 : 16);
-        registry.WriteRegistryInt(STRING("Device"), m_selectedAdapterIndex);
-        registry.WriteRegistryInt(STRING("FullScreen"), fullscreenRequested() ? 1 : 0);
-
-        const int lowDetail = registry.ReadRegistryInt(STRING("LowDetail"), 0);
+        // Steam sub_42A920 continues reading these flags from the same
+        // options-profile object (0x4F8000), not from the Windows registry.
+        // Keep the retail typo exactly: the executable contains
+        // "graph\ripleBuffer" (missing the leading 'T').
+        const int lowDetail = graphLoadOptionsInt("options://graph/LowDetail", 0);
         m_graphFlags = (m_graphFlags & ~0x00000040u) | ((lowDetail & 1) != 0 ? 0x00000040u : 0u);
 
         const GraphAdapterRecord& startupCatalog = selectedAdapterRecord();
         m_graphFlags &= ~0x00000004u;
 
         const bool tripleBuffer =
-            registry.ReadRegistryInt(STRING("TripleBuffer"), 1) != 0 &&
+            graphLoadOptionsInt("options://graph/ripleBuffer", 1) != 0 &&
             fullscreenRequested() &&
             (m_graphFlags & 0x00000080u) == 0u;
         m_graphFlags = (m_graphFlags & ~0x00000008u) | (tripleBuffer ? 0x00000008u : 0u);
@@ -4414,9 +4466,10 @@ namespace as1
 
         if (fullscreenOnlyChange && !fullscreenRequested())
         {
-            const STRING& registry = core::StartupRegistryPath();
-            const int y = registry.ReadRegistryInt(STRING("WindowPositionY"), 50);
-            const int x = registry.ReadRegistryInt(STRING("WindowPositionX"), 50);
+            // Steam SetFullscreen path (0x430F17..0x430F61) restores the
+            // window position from options.ini via profile object 0x4F8000.
+            const int y = graphLoadOptionsInt("options://WindowPositionY", 50);
+            const int x = graphLoadOptionsInt("options://WindowPositionX", 50);
             (void)::SetWindowPos(
                 static_cast<HWND>(m_windowHandle), nullptr, x, y, 0, 0, 0x201u);
         }
@@ -4610,7 +4663,7 @@ namespace as1
             const float targetY = static_cast<float>(static_cast<std::int32_t>(m_effectArgument2[2]));
             if (elapsed > duration)
             {
-                map->SetShiftCoor(targetX, targetY, 0);
+                map->SetPosition(targetX, targetY, 0);
                 m_effectStartTimes[2] = 0u;
             }
             else
@@ -4619,7 +4672,7 @@ namespace as1
                 const float t =
                     static_cast<float>(static_cast<std::int32_t>(elapsed)) /
                     static_cast<float>(static_cast<std::int32_t>(duration));
-                map->SetShiftCoor((targetX - startX) * t + startX,
+                map->SetPosition((targetX - startX) * t + startX,
                                   (targetY - startY) * t + startY,
                                   0);
             }
@@ -4993,6 +5046,6 @@ namespace as1
         map->read(&direction, 1);
         map->read(&magnitude, 2);
         m_windDirection = (m_windDirection & 0xFFFFFF00u) | direction;
-        m_windSpeed = static_cast<float>(magnitude) * 0.001f;
+        m_windSpeed = static_cast<float>(magnitude) / 1000.0f;
     }
 }

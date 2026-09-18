@@ -26,6 +26,10 @@
 #include <cstdint>
 #include <limits>
 
+#if defined(_MSC_VER) && defined(_M_IX86)
+#include <xmmintrin.h>
+#endif
+
 namespace as1
 {
     namespace
@@ -118,25 +122,17 @@ namespace as1
 
     namespace
     {
-        std::uint32_t playerFloatBits(float value) noexcept
-        {
-            std::uint32_t bits = 0u;
-            std::memcpy(&bits, &value, sizeof(bits));
-            return bits;
-        }
-
-        bool playerRetailFcompC3(float lhs, float rhs) noexcept
-        {
-            return lhs == rhs || std::isnan(lhs) || std::isnan(rhs);
-        }
-
         int playerTruncateFloatToInt32(float value) noexcept
         {
-            if (!std::isfinite(value) ||
-                value < static_cast<float>(std::numeric_limits<std::int32_t>::min()) ||
-                value >= 2147483648.0f)
+            // Audited PLAYER carrier paths use CVTTSS2SI directly.  Preserve
+            // the architectural integer-indefinite result for NaN/overflow.
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            if (!(value >= -2147483648.0f && value < 2147483648.0f))
                 return std::numeric_limits<std::int32_t>::min();
-            return static_cast<int>(std::trunc(value));
+            return static_cast<int>(value);
+#endif
         }
 
         bool playerOrderedFloatEqual(float lhs, float rhs) noexcept
@@ -144,17 +140,6 @@ namespace as1
             // The fallthrough is ordered equality only; unordered is treated as
             // not-equal.
             return !std::isnan(lhs) && !std::isnan(rhs) && lhs == rhs;
-        }
-
-        int playerConvertFloatToInt32(float value) noexcept
-        {
-            const long double d = static_cast<long double>(value);
-            if (!std::isfinite(d) ||
-                d < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                d > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(static_cast<std::uint64_t>(converted)));
         }
 
         int playerProjectedRowToInt32(float spriteY, float spriteZ,
@@ -351,8 +336,6 @@ namespace as1
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
         MAP* const map = MAP::Current();
-        GRAPH* const graph = GRAPH::CurrentGraph();
-        const float viewportTop = graph->viewportState().top;
 
         auto resolveVid = [](int index) noexcept -> VID* {
             VID* vid = nullptr;
@@ -364,9 +347,11 @@ namespace as1
         if (path.secondarySprites[terminalIndex] == 0u)
         {
             VID* const vid = resolveVid(path.terrainVid);
-            const float y = static_cast<float>(terrainCellStep * terminalIndex)
-                          + path.baseY
-                          + viewportTop + 2000.0f;
+            // sub_442C40: IMUL -> CVTDQ2PS -> ADDSS baseY -> ADDSS 2000.
+            const int rowProduct = playerImulLow32(terrainCellStep, terminalIndex);
+            float y = static_cast<float>(rowProduct);
+            y += path.baseY;
+            y += 2000.0f;
             SPRITE* const created = map->CreateSpriteViaFactory(
                 vid,
                 VECTOR{path.baseX, y, 2000.0f},
@@ -389,7 +374,7 @@ namespace as1
         path.targetY[terminalIndex] = targetY;
 
 #if UINTPTR_MAX == 0xFFFFFFFFu
-        if (!playerRetailFcompC3(targetX, -1.0f) || !playerRetailFcompC3(targetY, -1.0f))
+        if (!playerOrderedFloatEqual(targetX, -1.0f) || !playerOrderedFloatEqual(targetY, -1.0f))
         {
             VID* primaryVid = nullptr;
             const int primaryVidIndex = path.secondaryTerrainVid;
@@ -398,12 +383,12 @@ namespace as1
             if (!primaryVid)
                 primaryVid = MAP::NullVid();
 
-            GRAPH* const graph = GRAPH::CurrentGraph();
-            const float viewportTop = graph->viewportState().top;
-            const float y = static_cast<float>(terrainCellStep * terminalIndex)
-                          + static_cast<float>(terrainCellStep / 2)
-                          + path.baseY
-                          + viewportTop + 2000.0f;
+            // Original order is halfStep + baseY + rowProduct + 2000, with an
+            // ADDSS rounding point after every addition.
+            float y = static_cast<float>(terrainCellStep / 2);
+            y += path.baseY;
+            y += static_cast<float>(playerImulLow32(terrainCellStep, terminalIndex));
+            y += 2000.0f;
             const float x = path.baseX - 10.0f;
             SPRITE* const created = MAP::Current()->CreateSpriteViaFactory(
                 primaryVid, VECTOR{x, y, 2000.0f}, ANGLE{0}, nullptr, false);
@@ -514,8 +499,9 @@ namespace as1
             const int row = projectedRowNumerator / terrainCellStep;
             const float cameraX = path.targetX[row];
             const float cameraY = path.targetY[row];
-            if (!playerRetailFcompC3(cameraX, -999999.0f) || playerFloatBits(cameraY) != 0xC97423F0u)
-                MAP::Current()->SetShiftCoor(cameraX, cameraY, 2);
+            if (!playerOrderedFloatEqual(cameraX, -999999.0f) ||
+                !playerOrderedFloatEqual(cameraY, -999999.0f))
+                MAP::Current()->SetPosition(cameraX, cameraY, 2);
         }
     }
 

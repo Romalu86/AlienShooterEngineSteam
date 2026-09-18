@@ -267,10 +267,10 @@ namespace as1
         float viewportRight() const noexcept { return m_viewportRight; }
         float viewportTop() const noexcept { return m_viewportTop; }
         float viewportBottom() const noexcept { return m_viewportBottom; }
-        double getViewportLeft() const noexcept;
-        double getViewportRight() const noexcept;
-        double getViewportTop() const noexcept;
-        double getViewportBottom() const noexcept;
+        double getViewportLeft() const noexcept; // [GRAPH+0x258] left
+        double getViewportRight() const noexcept; // [GRAPH+0x25C] right
+        double getViewportTop() const noexcept; // [GRAPH+0x260] top
+        double getViewportBottom() const noexcept; // [GRAPH+0x264] bottom
         void rawSetSoftwareClipBounds(int left, int top, int right, int bottom) noexcept
         {
             g_softwareClipLeft = left;

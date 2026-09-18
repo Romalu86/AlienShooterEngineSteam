@@ -39,6 +39,9 @@
 #include <cstdio>
 #include <cstdint>
 #include <string>
+#if defined(_MSC_VER) && defined(_M_IX86)
+#include <xmmintrin.h>
+#endif
 #if defined(_MSC_VER)
 #include <io.h>
 #endif
@@ -48,6 +51,29 @@ namespace as1
 
     namespace
     {
+        int scriptCvttss2si(float value) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtt_ss2si(_mm_set_ss(value));
+#else
+            // CVTTSS2SI/CVTTSD2SI return integer-indefinite for unordered or
+            // out-of-range input.  Steam's native dispatcher uses this exact
+            // conversion for coordinate/viewport/map-size results.
+            if (!(value >= -2147483648.0f && value < 2147483648.0f))
+                return static_cast<int>(0x80000000u);
+            return static_cast<int>(value);
+#endif
+        }
+
+        float scriptSubF32(float lhs, float rhs) noexcept
+        {
+#if defined(_MSC_VER) && defined(_M_IX86)
+            return _mm_cvtss_f32(_mm_sub_ss(_mm_set_ss(lhs), _mm_set_ss(rhs)));
+#else
+            return lhs - rhs;
+#endif
+        }
+
         std::uint32_t retailFileLength32(const FileStream& stream) noexcept
         {
 #if defined(_MSC_VER)
@@ -182,19 +208,6 @@ namespace as1
             return b0 | (b1 << 8) | (b2 << 16);
         }
 
-        int scriptNativeEncodeGammaIndex(std::uint32_t diffuse, std::uint32_t specular)
-        {
-            std::uint32_t out = (diffuse >> 1) & 0x7F7F7F7Fu;
-            for (int shift = 0; shift < 32; shift += 8)
-            {
-                const std::uint32_t specByte = (specular >> shift) & 0xFFu;
-                if (specByte == 0)
-                    continue;
-                const std::uint32_t packedByte = 0x80u | (((~specByte) & 0xFEu) >> 1);
-                out = (out & ~(0xFFu << shift)) | ((packedByte & 0xFFu) << shift);
-            }
-            return static_cast<int>(out);
-        }
     }
 
 
@@ -3332,16 +3345,10 @@ namespace as1
         0x3F7B14BEu, 0x3F7C3B28u, 0x3F7D3AACu, 0x3F7E1324u, 0x3F7EC46Du, 0x3F7F4E6Du, 0x3F7FB10Fu, 0x3F7FEC43u,
         };
 
-        float scriptNativeFloatFromBits(std::uint32_t bits)
-        {
-            float value = 0.0f;
-            std::memcpy(&value, &bits, sizeof(value));
-            return value;
-        }
-
         int scriptNativeTable1024ToInt(float value)
         {
-            return static_cast<int>(value * 1024.0f);
+            // Steam native Sin/Cos (165/166): MULSS 1024.0f -> CVTTSS2SI.
+            return scriptCvttss2si(value * 1024.0f);
         }
 
         int scriptNativeSin1024(int angle)
@@ -4307,7 +4314,7 @@ namespace as1
                     const float distance = static_cast<float>(approximatePlanarDistance(
                         static_cast<float>(x) - sprite->X(),
                         static_cast<float>(y) - sprite->Y()));
-                    value = static_cast<int>(distance);
+                    value = scriptCvttss2si(distance);
                 }
                 scriptPushIntegerRetail(value);
                 return 0;
@@ -4344,21 +4351,21 @@ namespace as1
 {
                 const int handle = script->popSpriteReferenceValue();
                 SPRITE* const sprite = scriptResolveSpriteReference(handle);
-                scriptPushIntegerRetail(sprite ? static_cast<int>(sprite->xCoordinateValue()) : 0);
+                scriptPushIntegerRetail(sprite ? scriptCvttss2si(sprite->xCoordinateValue()) : 0);
                 return 0;
             }
         case script::NativeFunctionCode::GetY:
 {
                 const int handle = script->popSpriteReferenceValue();
                 SPRITE* const sprite = scriptResolveSpriteReference(handle);
-                scriptPushIntegerRetail(sprite ? static_cast<int>(sprite->yCoordinateValue()) : 0);
+                scriptPushIntegerRetail(sprite ? scriptCvttss2si(sprite->yCoordinateValue()) : 0);
                 return 0;
             }
         case script::NativeFunctionCode::GetZ:
 {
                 const int handle = script->popSpriteReferenceValue();
                 SPRITE* const sprite = scriptResolveSpriteReference(handle);
-                scriptPushIntegerRetail(sprite ? static_cast<int>(sprite->Z()) : 0);
+                scriptPushIntegerRetail(sprite ? scriptCvttss2si(sprite->Z()) : 0);
                 return 0;
             }
         case script::NativeFunctionCode::GetDirection:
@@ -4390,13 +4397,13 @@ namespace as1
         case script::NativeFunctionCode::ViewXMin:
 {
                 GRAPH* const graph = GRAPH::CurrentGraph();
-                scriptPushIntegerRetail(static_cast<int>(static_cast<float>(graph->getViewportLeft())));
+                scriptPushIntegerRetail(scriptCvttss2si(graph->viewportLeft()));
                 return 0;
             }
         case script::NativeFunctionCode::ViewYMin:
 {
                 GRAPH* const graph = GRAPH::CurrentGraph();
-                scriptPushIntegerRetail(static_cast<int>(static_cast<float>(graph->getViewportTop())));
+                scriptPushIntegerRetail(scriptCvttss2si(graph->viewportTop()));
                 return 0;
             }
         case script::NativeFunctionCode::GetCommands:
@@ -4604,7 +4611,7 @@ namespace as1
                 scriptPushSpriteReferenceRetail(scriptSpritePointerValue(created));
                 return 0;
             }
-        case script::NativeFunctionCode::MenuLeftClick:
+        case script::NativeFunctionCode::MenuLClick:
 {
                 MENU& list = applicationMenu();
                 SPRITE* const selected = (list.controlFlags() & 1u) != 0u
@@ -4615,12 +4622,12 @@ namespace as1
             }
         case script::NativeFunctionCode::GetInputX:
 {
-                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState().worldX));
+                scriptPushIntegerRetail(scriptCvttss2si(scriptApplicationInputState().worldX));
                 return 0;
             }
         case script::NativeFunctionCode::GetInputY:
 {
-                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState().worldY));
+                scriptPushIntegerRetail(scriptCvttss2si(scriptApplicationInputState().worldY));
                 return 0;
             }
         case script::NativeFunctionCode::GetKey:
@@ -4629,7 +4636,7 @@ namespace as1
                 scriptPushIntegerRetail(value);
                 return 0;
             }
-        case script::NativeFunctionCode::MenuMode:
+        case script::NativeFunctionCode::Pause:
 {
                 const int value = scriptPopIntegerRetail();
                 if (value != 0)
@@ -4693,11 +4700,11 @@ namespace as1
                 scriptPushIntegerRetail(packed);
                 return 0;
             }
-        case script::NativeFunctionCode::SetShiftCoor:
+        case script::NativeFunctionCode::SetPosition:
 {
                 const int y = scriptPopIntegerRetail();
                 const int x = scriptPopIntegerRetail();
-                MAP::Current()->SetShiftCoor(static_cast<float>(x), static_cast<float>(y), 0);
+                MAP::Current()->SetPosition(static_cast<float>(x), static_cast<float>(y), 0);
                 return 0;
             }
         case script::NativeFunctionCode::SetScrollType:
@@ -4712,17 +4719,17 @@ namespace as1
             }
         case script::NativeFunctionCode::ScreenX:
 {
-                const int value = GRAPH::CurrentGraph()->SizeX();
+                const int value = scriptCvttss2si(GRAPH::CurrentGraph()->screenWidth());
                 scriptPushIntegerRetail(value);
                 return 0;
             }
         case script::NativeFunctionCode::ScreenY:
 {
-                const int value = GRAPH::CurrentGraph()->SizeY();
+                const int value = scriptCvttss2si(GRAPH::CurrentGraph()->screenHeight());
                 scriptPushIntegerRetail(value);
                 return 0;
             }
-        case script::NativeFunctionCode::SetApplicationFlag7:
+        case script::NativeFunctionCode::SetSelectUnit:
 {
                 const int value = scriptPopIntegerRetail();
                 std::uint32_t flags = core::ApplicationFlags();
@@ -4731,7 +4738,7 @@ namespace as1
                 core::SetApplicationFlags(flags);
                 return 0;
             }
-        case script::NativeFunctionCode::PlayerNoop:
+        case script::NativeFunctionCode::SetStateBar:
 {
                 const int value = scriptPopIntegerRetail();
                 PLAYER* const player = scriptPlayerSlot(static_cast<int>(core::ActivePlayerIndex()));
@@ -4771,7 +4778,10 @@ namespace as1
         case script::NativeFunctionCode::ToScreenX:
 {
                 const int x = scriptPopIntegerRetail();
-                const int value = static_cast<int>(static_cast<float>(x) - core::GlobalApplicationDrawDispatcherState().cameraShiftX());
+                const float valueF32 = scriptSubF32(
+                    static_cast<float>(x),
+                    core::GlobalApplicationDrawDispatcherState().cameraShiftX());
+                const int value = scriptCvttss2si(valueF32);
                 scriptPushIntegerRetail(value);
                 return 0;
             }
@@ -4779,11 +4789,15 @@ namespace as1
 {
                 const int z = scriptPopIntegerRetail();
                 const int y = scriptPopIntegerRetail();
-                const int value = static_cast<int>(static_cast<float>(y) - static_cast<float>(z) - core::GlobalApplicationDrawDispatcherState().cameraShiftY());
+                const float yMinusZ = scriptSubF32(static_cast<float>(y), static_cast<float>(z));
+                const float valueF32 = scriptSubF32(
+                    yMinusZ,
+                    core::GlobalApplicationDrawDispatcherState().cameraShiftY());
+                const int value = scriptCvttss2si(valueF32);
                 scriptPushIntegerRetail(value);
                 return 0;
             }
-        case script::NativeFunctionCode::MenuRightClick:
+        case script::NativeFunctionCode::MenuRClick:
 {
                 MENU& list = applicationMenu();
                 SPRITE* const selected = (list.controlFlags() & 2u) != 0u
@@ -4811,7 +4825,7 @@ namespace as1
                 }
                 return 0;
             }
-        case script::NativeFunctionCode::CursorAction:
+        case script::NativeFunctionCode::SetCursorPosition:
 {
                 const int var1 = scriptPopIntegerRetail();
                 const int var2 = scriptPopIntegerRetail();
@@ -4854,10 +4868,17 @@ namespace as1
                 const int nsfx = scriptPopIntegerRetail();
                 GRAPH* const graph = GRAPH::CurrentGraph();
                 const core::ApplicationDrawDispatcherState& drawState = core::GlobalApplicationDrawDispatcherState();
-                const float halfScreenX = static_cast<float>(graph->SizeX()) * 0.5f;
-                const float halfScreenY = static_cast<float>(graph->SizeY()) * 0.5f;
-                const float soundX = static_cast<float>(x) - drawState.cameraShiftX() - halfScreenX;
-                const float soundY = static_cast<float>(y) - drawState.cameraShiftY() - halfScreenY;
+                // Steam case 135 uses the raw GRAPH float dimensions (+244/+248),
+                // MULSS 0.5 and two distinct SUBSS operations.  Do not pass the
+                // dimensions through the integer SizeX/SizeY accessors first.
+                const float halfScreenX = graph->screenWidth() * 0.5f;
+                const float halfScreenY = graph->screenHeight() * 0.5f;
+                const float soundXFromCamera = scriptSubF32(
+                    static_cast<float>(x), drawState.cameraShiftX());
+                const float soundYFromCamera = scriptSubF32(
+                    static_cast<float>(y), drawState.cameraShiftY());
+                const float soundX = scriptSubF32(soundXFromCamera, halfScreenX);
+                const float soundY = scriptSubF32(soundYFromCamera, halfScreenY);
                 sound::GlobalSoundEngine()->enqueueSoundRequestFromCoordinates(nsfx, soundX, soundY);
                 return 0;
             }
@@ -4904,7 +4925,7 @@ namespace as1
                 const int direct = scriptPopIntegerRetail();
                 const int wind = scriptPopIntegerRetail();
                 GRAPH::CurrentGraph()->SetWind(static_cast<std::uint32_t>(direct) & 0xFFu,
-                                               static_cast<float>(wind) * 0.001f);
+                                               static_cast<float>(wind) / 1000.0f);
                 return 0;
             }
         case script::NativeFunctionCode::PlayMovie:
@@ -4960,7 +4981,7 @@ namespace as1
                 scriptPushIntegerRetail(GRAPH::CurrentGraph()->getEffectState(effect));
                 return 0;
             }
-        case script::NativeFunctionCode::GetPrevMapName:
+        case script::NativeFunctionCode::GetPreviousMapName:
 {
                 script->pushStringValue(core::ApplicationPreviousMapName());
                 return 0;
@@ -4978,7 +4999,7 @@ namespace as1
                 script->pushStringValue(core::ApplicationCurrentMapName());
                 return 0;
             }
-        case script::NativeFunctionCode::ExecuteShellFile:
+        case script::NativeFunctionCode::Exec:
 {
                 lpFile.Assign(script->popStringRetail()->c_str());
                 LOG::Write("Exec '%s'", lpFile.c_str());
@@ -5046,12 +5067,14 @@ namespace as1
 {
                 const int y = scriptPopIntegerRetail();
                 const int x = scriptPopIntegerRetail();
-                const int value = static_cast<int>(MAP::Current()->GetGroundZ(VECTOR2{static_cast<float>(x), static_cast<float>(y)}));
+                const float ground = MAP::Current()->GetGroundZ(
+                    VECTOR2{static_cast<float>(x), static_cast<float>(y)});
+                const int value = scriptCvttss2si(ground);
                 scriptPushIntegerRetail(value);
                 return 0;
             }
         case script::NativeFunctionCode::StringLength:
-        case script::NativeFunctionCode::StringLengthCompat:
+        case script::NativeFunctionCode::strlenCompat205:
 {
                 const STRING& text = *script->popStringRetail();
                 scriptPushIntegerRetail(text.Length());
@@ -5064,7 +5087,7 @@ namespace as1
                 MAP::Current()->SetFlagman(playerIndex, scriptResolveSpriteReference(spriteHandle));
                 return 0;
             }
-        case script::NativeFunctionCode::AskPlace:
+        case script::NativeFunctionCode::CanPlace:
 {
                 const int z = scriptPopIntegerRetail();
                 const int y = scriptPopIntegerRetail();
@@ -5096,7 +5119,7 @@ namespace as1
                     scriptPushIntegerRetail(static_cast<int>(vid->maxHp));
                     return 0;
                 case script::VidDataCode::BattleRange:
-                    scriptPushIntegerRetail(static_cast<int>(vid->weaponBattleRange()));
+                    scriptPushIntegerRetail(scriptCvttss2si(vid->weaponBattleRange()));
                     return 0;
                 case script::VidDataCode::Ammo:
                     scriptPushIntegerRetail(vid->activeWeaponAmmoCapacity());
@@ -5137,16 +5160,16 @@ namespace as1
                 case script::VidDataCode::Speed:
                     scriptPushIntegerRetail(vid->maxSpeedValue() == 999999.0f
                         ? 999999
-                        : static_cast<int>(vid->maxSpeedValue() * 1000.0f));
+                        : scriptCvttss2si(vid->maxSpeedValue() * 1000.0f));
                     return 0;
                 case script::VidDataCode::Lifetime:
                     scriptPushIntegerRetail(vid->lifetimeValue());
                     return 0;
                 case script::VidDataCode::DetectRange:
-                    scriptPushIntegerRetail(static_cast<int>(vid->weaponDetectRange()));
+                    scriptPushIntegerRetail(scriptCvttss2si(vid->weaponDetectRange()));
                     return 0;
                 case script::VidDataCode::WeaponAim:
-                    scriptPushIntegerRetail(static_cast<int>(vid->weaponAim()));
+                    scriptPushIntegerRetail(scriptCvttss2si(vid->weaponAim()));
                     return 0;
                 case script::VidDataCode::DirectionCount:
                     scriptPushIntegerRetail(vid->directionCount());
@@ -5257,7 +5280,7 @@ namespace as1
                     return 0;
                 case script::VidDataCode::Speed:
                 {
-                    vid->setMaxSpeedValue(value == 999999 ? 999999.0f : static_cast<float>(value) * 0.001f);
+                    vid->setMaxSpeedValue(value == 999999 ? 999999.0f : static_cast<float>(value) / 1000.0f);
                     const core::ApplicationDrawPassBucket& bucket =
                         core::GlobalApplicationDrawDispatcherState().drawPassBucket(vid->renderLayer());
                     SPRITE* const* slots = bucket.data();
@@ -5366,7 +5389,7 @@ namespace as1
                 return 0;
 
             }
-        case script::NativeFunctionCode::IntToString:
+        case script::NativeFunctionCode::itoa:
 {
                 const int value = scriptPopIntegerRetail();
                 char buffer[128];
@@ -5389,9 +5412,9 @@ namespace as1
         case script::NativeFunctionCode::MapSizeX:
 {
                 #ifdef _WIN32
-                        const int value = static_cast<int>(win::applicationWinInstance()->mapExtentX());
+                        const int value = scriptCvttss2si(win::applicationWinInstance()->mapExtentX());
                 #else
-                        const int value = static_cast<int>(core::ApplicationMapWidth());
+                        const int value = scriptCvttss2si(core::ApplicationMapWidth());
                 #endif
                         scriptPushIntegerRetail(value);
                         return 0;
@@ -5399,9 +5422,9 @@ namespace as1
         case script::NativeFunctionCode::MapSizeY:
 {
                 #ifdef _WIN32
-                        const int value = static_cast<int>(win::applicationWinInstance()->mapExtentY());
+                        const int value = scriptCvttss2si(win::applicationWinInstance()->mapExtentY());
                 #else
-                        const int value = static_cast<int>(core::ApplicationMapHeight());
+                        const int value = scriptCvttss2si(core::ApplicationMapHeight());
                 #endif
                         scriptPushIntegerRetail(value);
                         return 0;
@@ -5446,10 +5469,10 @@ namespace as1
                 }
                 return 0;
             }
-        case script::NativeFunctionCode::Crc:
+        case script::NativeFunctionCode::Crc32:
 {
                 const STRING text = *script->popStringRetail();
-                const Crc32 crc(text.c_str(), static_cast<unsigned int>(text.Length()));
+                const Crc3232 crc(text.c_str(), static_cast<unsigned int>(text.Length()));
                 scriptPushIntegerRetail(static_cast<int>(crc.Value()));
                 return 0;
             }
@@ -5483,7 +5506,7 @@ namespace as1
                 (void)MAP::Current()->reloadGameResourceParameters();
                 return 0;
             }
-        case script::NativeFunctionCode::FileWrite:
+        case script::NativeFunctionCode::FWrite:
 {
                 const STRING value = *script->popStringRetail();
                 const int fileValue = scriptPopIntegerRetail();
@@ -5499,7 +5522,7 @@ namespace as1
                 std::fputs("\n", file);
                 return 0;
             }
-        case script::NativeFunctionCode::FileRead:
+        case script::NativeFunctionCode::FRead:
 {
                 const int fileValue = scriptPopIntegerRetail();
                 STRING lpFile;
@@ -5520,7 +5543,7 @@ namespace as1
                 script->pushStringResult(lpFile);
                 return 0;
             }
-        case script::NativeFunctionCode::FileOpen:
+        case script::NativeFunctionCode::FOpen:
 {
                 const STRING filename = *script->popStringRetail();
                 if ((core::ApplicationFlags() & application_flags::DemoUseResource) != 0)
@@ -5535,7 +5558,7 @@ namespace as1
                 scriptPushIntegerRetail(scriptNativeIntFromFile(file));
                 return 0;
             }
-        case script::NativeFunctionCode::FileClose:
+        case script::NativeFunctionCode::FClose:
 {
                 const int fileValue = scriptPopIntegerRetail();
                 if (fileValue == 0)
@@ -5544,7 +5567,7 @@ namespace as1
                     std::fclose(file);
                 return 0;
             }
-        case script::NativeFunctionCode::FileCreate:
+        case script::NativeFunctionCode::FCreate:
 {
                 const STRING filename = *script->popStringRetail();
                 if ((core::ApplicationFlags() & application_flags::DemoUseResource) != 0)
@@ -5554,46 +5577,46 @@ namespace as1
                 scriptPushIntegerRetail(scriptNativeIntFromFile(file));
                 return 0;
             }
-        case script::NativeFunctionCode::FileEof:
+        case script::NativeFunctionCode::FEof:
 {
                 const int fileValue = scriptPopIntegerRetail();
                 if (fileValue == 0)
                     return (scriptPushIntegerRetail(1), 0);
 
                 std::FILE* file = scriptNativeFileFromInt(fileValue);
-                scriptPushIntegerRetail(file && std::feof(file) ? 0x10 : 0);
+                scriptPushIntegerRetail(file && std::feof(file) != 0 ? 1 : 0);
                 return 0;
             }
-        case script::NativeFunctionCode::FileDataSave:
+        case script::NativeFunctionCode::FSaveData:
 {
                 const STRING value = *script->popStringRetail();
                 const STRING path = *script->popStringRetail();
-                FileDataSave(path, value);
+                FSaveData(path, value);
                 return 0;
             }
-        case script::NativeFunctionCode::FileDataLoad:
+        case script::NativeFunctionCode::FLoadData:
 {
                 const STRING defaultValue = *script->popStringRetail();
                 const STRING path = *script->popStringRetail();
-                script->pushStringResult(FileDataLoad(path, defaultValue));
+                script->pushStringResult(FLoadData(path, defaultValue));
                 return 0;
             }
-        case script::NativeFunctionCode::FileExists:
+        case script::NativeFunctionCode::FileExist:
 {
-                scriptPushIntegerRetail(FileDataFileExists(*script->popStringRetail()));
+                scriptPushIntegerRetail(FileDataFileExist(*script->popStringRetail()));
                 return 0;
             }
         case script::NativeFunctionCode::SaveFolder:
 {
-                script->pushStringResult(STRING(FileDataSaveFolder()));
+                script->pushStringResult(STRING(FSaveDataFolder()));
                 return 0;
             }
-        case script::NativeFunctionCode::StringLower:
+        case script::NativeFunctionCode::ToLower:
 {
                 script->pushStringValue(script->popStringRetail()->ToLower());
                 return 0;
             }
-        case script::NativeFunctionCode::StringUpper:
+        case script::NativeFunctionCode::ToUpper:
 {
                 script->pushStringValue(script->popStringRetail()->ToUpper());
                 return 0;
@@ -5641,7 +5664,7 @@ namespace as1
                 scriptPushIntegerRetail(steam::GetStat(id.c_str()));
                 return 0;
             }
-        case script::NativeFunctionCode::StoreSaveStatsIfNeeded:
+        case script::NativeFunctionCode::StoreSaveStatsIfNeed:
 {
                 steam::SaveStatsIfNeeded();
                 return 0;
@@ -5682,7 +5705,7 @@ namespace as1
                 scriptPushIntegerRetail(steam::LeaderboardEntryScore(scriptPopIntegerRetail()));
                 return 0;
             }
-        case script::NativeFunctionCode::StoreGetUpdateLeaderboardRank:
+        case script::NativeFunctionCode::GetUpdateLeaderboardRank:
 {
                 scriptPushIntegerRetail(steam::LastUploadRank());
                 return 0;
@@ -5740,15 +5763,15 @@ namespace as1
             }
         case script::NativeFunctionCode::GetScreenInputX:
 {
-                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState().clientX));
+                scriptPushIntegerRetail(scriptCvttss2si(scriptApplicationInputState().clientX));
                 return 0;
             }
         case script::NativeFunctionCode::GetScreenInputY:
 {
-                scriptPushIntegerRetail(static_cast<int>(scriptApplicationInputState().clientY));
+                scriptPushIntegerRetail(scriptCvttss2si(scriptApplicationInputState().clientY));
                 return 0;
             }
-        case script::NativeFunctionCode::PlayerPathFlag:
+        case script::NativeFunctionCode::SetCleverEnemyAttack:
 {
                 const int value = scriptPopIntegerRetail();
                 scriptPlayerSlot(1)->setPathSecondaryFlag(value);
@@ -5784,14 +5807,14 @@ namespace as1
                 scriptPushIntegerRetail(static_cast<int>(scriptPlayerSlot(playerIndex)->getMoney()));
                 return 0;
             }
-        case script::NativeFunctionCode::Noop253:
+        case script::NativeFunctionCode::CanMoveEngineTo:
 {
                 (void)scriptPopIntegerRetail();
                 (void)scriptPopIntegerRetail();
                 (void)script->popSpriteReference();
                 return 0;
             }
-        case script::NativeFunctionCode::Noop254:
+        case script::NativeFunctionCode::CanAttackEngine:
 {
                 (void)script->popSpriteReference();
                 (void)script->popSpriteReference();

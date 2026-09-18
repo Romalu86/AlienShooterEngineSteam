@@ -6,6 +6,11 @@ namespace as1
 {
     class BaseStream
     {
+    protected:
+        // Retail STREAM vtable slot 0 is the deleting destructor; keep the
+        // declaration before read/write so MSVC emits the original slot order.
+        virtual ~BaseStream() = default;
+
     public:
         virtual int read(void* buf, unsigned size) = 0;
         virtual int write(const void* buf, unsigned size) = 0;
@@ -26,8 +31,6 @@ namespace as1
                 : 0;
         }
 
-    protected:
-        ~BaseStream() = default;
     };
 
     template<class T>

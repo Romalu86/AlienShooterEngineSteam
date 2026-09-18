@@ -23,8 +23,6 @@
 #include <unordered_map>
 #endif
 #include <new>
-#include <cmath>
-#include <limits>
 #include <cstdint>
 
 namespace as1
@@ -127,12 +125,6 @@ namespace as1
                 static_cast<std::uint32_t>(lhs) + static_cast<std::uint32_t>(rhs));
         }
 
-        std::int32_t subtractWrap32(std::int32_t lhs, std::int32_t rhs) noexcept
-        {
-            return static_cast<std::int32_t>(
-                static_cast<std::uint32_t>(lhs) - static_cast<std::uint32_t>(rhs));
-        }
-
         int signedScaleShift(int numerator, int shift) noexcept
         {
             const int mask = (1 << shift) - 1;
@@ -146,22 +138,6 @@ namespace as1
             if (denominator == 0)
                 std::abort();
             return numerator / denominator;
-        }
-
-        int vidConvertFloatToInt32(float value) noexcept
-        {
-            const long double d = static_cast<long double>(value);
-            if (!std::isfinite(d) ||
-                d < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                d > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            const std::int64_t converted = static_cast<std::int64_t>(std::trunc(d));
-            return static_cast<int>(static_cast<std::uint32_t>(converted));
-        }
-
-        bool x87LessOrUnorderedForVid(float lhs, float rhs) noexcept
-        {
-            return lhs < rhs || std::isnan(lhs) || std::isnan(rhs);
         }
 
         std::int32_t pointerLow32(const void* p) noexcept
@@ -612,21 +588,24 @@ namespace as1
         {
             const float topZGate = topZValue();
 
-            if (topZGate == 0.0f || std::isnan(topZGate))
+            // Retail UCOMISS path computes the free-flight value only for
+            // ordered equality with zero. Unordered (NaN) follows the nonzero path.
+            if (topZGate == 0.0f)
                 result = verticalDelta * maxSpeedValue() / projectedXYLength;
             else
                 result = 0.0f;
         }
 
 
-        if (result > maximumZSpeed())
-            result = maximumZSpeed();
+        const float maxZSpeed = maximumZSpeed();
+        if (result > maxZSpeed)
+            result = maxZSpeed;
         else
         {
-            const float negativeMaxZSpeed = -maximumZSpeed();
-
-            if (result < negativeMaxZSpeed || std::isnan(result))
-                result = negativeMaxZSpeed;
+            const float negativeMaxZSpeed = -maxZSpeed;
+            // Mirrors MAXSS xmm0,xmm1 with xmm0=-maxZ and xmm1=result:
+            // on equality or unordered the source operand (result) is selected.
+            result = (negativeMaxZSpeed > result) ? negativeMaxZSpeed : result;
         }
         return result;
     }
@@ -774,8 +753,8 @@ namespace as1
     bool& VID::hostCompressedSurfPresentStorage() { return vidHostSidecar(this).compressedSurfPresent; }
     size_t& VID::hostCompressedSurfBytesStorage() { return vidHostSidecar(this).compressedSurfBytes; }
 #endif
-    int& VID::hostFrameSpeedStorage(int animation) { return frameSpeed[static_cast<std::size_t>(animation) % NO_ANIMATION]; }
-    int VID::hostFrameSpeedStorage(int animation) const { return frameSpeed[static_cast<std::size_t>(animation) % NO_ANIMATION]; }
+    int& VID::hostFrameSpeedStorage(int animation) { return frameSpeed[animation]; }
+    int VID::hostFrameSpeedStorage(int animation) const { return frameSpeed[animation]; }
 
 #if !defined(_MSC_VER) || !defined(_M_IX86)
     const std::vector<VID::PaletteEntry>& VID::palette() const { return vidHostSidecar(this).palette; }
@@ -2704,10 +2683,12 @@ namespace as1
         int end = noGridZ;
         if (gridCadrShift)
         {
+            // sub_47C450 uses MOVSX on noCadr and only checks frame >= count.
+            // There is no frame>=0 clamp before indexing.
             const int frame = sprite->currentFrame();
-            const int frameCount = static_cast<int>(static_cast<std::uint16_t>(noCadr));
-            begin = (frame >= 0 && frame < frameCount) ? gridCadrShift[frame] : 0;
-            end = (frame >= 0 && frame < frameCount - 1) ? gridCadrShift[frame + 1] : noGridZ;
+            const int frameCount = static_cast<int>(noCadr);
+            begin = (frame < frameCount) ? gridCadrShift[frame] : 0;
+            end = (frame < frameCount - 1) ? gridCadrShift[frame + 1] : noGridZ;
         }
 
         MAP* const map = sprite->mapOwner();
@@ -2727,99 +2708,6 @@ namespace as1
         }
     }
 
-    int VID_SOFTWARE::updateGroundZFromCompactFrame(const SPRITE* sprite) noexcept
-    {
-
-        const int spriteZ = vidConvertFloatToInt32(sprite->Z());
-        const WORD typeFlags = formatFlags();
-        if ((typeFlags & VID_TYPE_ZBUFFER) == 0)
-            return spriteZ;
-
-        short localGrid[65536];
-        std::memset(localGrid, 0, sizeof(localGrid));
-
-        const int frameIndex = sprite->currentFrame();
-        const DWORD frameOffset = frameOffsets()[frameIndex];
-        BYTE* frame = frameStorage() + frameOffset;
-        const int frameHeaderCount = static_cast<int>(*reinterpret_cast<const short*>(frame));
-        BYTE* rowData = frame + 2 + frameHeaderCount * 6;
-
-        const int left = subtractWrap32(vidConvertFloatToInt32(sprite->X()), vidWidth() / 2);
-        const int topWithoutZ = subtractWrap32(vidConvertFloatToInt32(sprite->Y()), vidHeight() / 2);
-        const int topProjected = subtractWrap32(topWithoutZ, spriteZ);
-        const int zBase = subtractWrap32(spriteZ, 128);
-
-        if ((typeFlags & VID_TYPE_PALETTE) != 0 && (typeFlags & VID_TYPE_TEXTURE) != 0)
-        {
-            int row = static_cast<int>(*reinterpret_cast<const short*>(rowData));
-            const int rowEnd = row + static_cast<int>(*reinterpret_cast<const short*>(rowData + 2));
-            rowData += 4;
-
-            while (row < rowEnd)
-            {
-                int x = 0;
-                if (*reinterpret_cast<const WORD*>(rowData) != 0)
-                {
-                    do
-                    {
-                        x = addWrap32(x, static_cast<int>(*rowData++));
-                        const int count = static_cast<int>(*rowData++);
-                        const int runStartX = x;
-                        const WORD* zWords = reinterpret_cast<const WORD*>(rowData);
-
-                        for (int i = 0; i < count; ++i, ++x)
-                        {
-                            const int localZ = addWrap32(zBase, static_cast<int>(zWords[i] >> 3u));
-                            const int projectedY = addWrap32(row, localZ);
-                            if (projectedY >= 0 && projectedY < 2048 && x >= 0 && x < 2048)
-                            {
-                                const int cell = (x / 8) + ((projectedY / 8) << 8);
-                                if (localZ > static_cast<int>(localGrid[cell]))
-                                    localGrid[cell] = static_cast<short>(localZ);
-                            }
-                        }
-
-                        // DATA run storage is count WORD Z values followed by
-                        // count color/palette bytes.  updateGroundZFromCompactFrame advances 3*count
-                        // bytes and tests the following WORD terminator.
-                        x = addWrap32(runStartX, count);
-                        rowData += count * 3;
-                    }
-                    while (*reinterpret_cast<const WORD*>(rowData) != 0);
-                }
-
-                row = addWrap32(row, 1);
-                rowData += 2;
-            }
-        }
-
-        MAP* const map = sprite->mapOwner();
-        const int leftGrid = left / 8;
-        const int topGrid = topProjected / 8;
-        const int bucketWidth = vidWidth() / 8;
-        const int bucketHeight = vidHeight() / 8;
-
-        for (int localY = bucketHeight - 1; localY >= 0; --localY)
-        {
-            const int worldYCell = addWrap32(topGrid, localY);
-            const float worldY = static_cast<float>(worldYCell) * 8.0f;
-            const short* rowCells = localGrid + localY * 256;
-            for (int localX = 0; localX < bucketWidth; ++localX)
-            {
-                const int worldXCell = addWrap32(leftGrid, localX);
-                const float worldX = static_cast<float>(worldXCell) * 8.0f;
-                const float gridZ = static_cast<float>(rowCells[localX]);
-                const float groundZ = map->GetGroundZ(VECTOR2{worldX, worldY});
-
-                if (x87LessOrUnorderedForVid(groundZ, gridZ))
-                    map->setTerrainHeightAtWorldPosition(worldX, worldY, gridZ);
-            }
-        }
-
-
-        return bucketHeight > 0 ? 0 : (bucketHeight - 1);
-    }
-
     void VID::ResetGridZ(const SPRITE* sprite)
     {
         if (!sprite || sprite == Mouse || noGridZ <= 0 || !gridZ)
@@ -2831,10 +2719,12 @@ namespace as1
         int end = noGridZ;
         if (gridCadrShift)
         {
+            // sub_47BB70 uses MOVSX on noCadr and only checks frame >= count.
+            // There is no frame>=0 clamp before indexing.
             const int frame = sprite->currentFrame();
-            const int frameCount = static_cast<int>(static_cast<std::uint16_t>(noCadr));
-            begin = (frame >= 0 && frame < frameCount) ? gridCadrShift[frame] : 0;
-            end = (frame >= 0 && frame < frameCount - 1) ? gridCadrShift[frame + 1] : noGridZ;
+            const int frameCount = static_cast<int>(noCadr);
+            begin = (frame < frameCount) ? gridCadrShift[frame] : 0;
+            end = (frame < frameCount - 1) ? gridCadrShift[frame + 1] : noGridZ;
         }
 
         MAP* const map = sprite->mapOwner();

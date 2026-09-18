@@ -11,34 +11,9 @@
 #include <cstdint>
 #include <cstdlib>
 #include <new>
-#include <limits>
 
 namespace as1
 {
-    namespace
-    {
-        int civConvertFloatToInt32(long double value) noexcept
-        {
-            if (!std::isfinite(value) ||
-                value < static_cast<long double>(std::numeric_limits<std::int64_t>::min()) ||
-                value > static_cast<long double>(std::numeric_limits<std::int64_t>::max()))
-                return 0;
-            return static_cast<int>(static_cast<std::uint32_t>(
-                static_cast<std::uint64_t>(static_cast<std::int64_t>(std::trunc(value)))));
-        }
-
-        int civSubtractAndConvertToInt32(float lhs, float rhs) noexcept
-        {
-            return civConvertFloatToInt32(static_cast<long double>(lhs) - static_cast<long double>(rhs));
-        }
-
-        int civSubtractRoundedFloatAndConvertToInt32(float lhs, float rhs) noexcept
-        {
-            const float rounded = static_cast<float>(
-                static_cast<long double>(lhs) - static_cast<long double>(rhs));
-            return civConvertFloatToInt32(static_cast<long double>(rounded));
-        }
-    }
     CIV_ROBOT::CIV_ROBOT(MAP* owner, VID* vid, const VECTOR& xyz, const ANGLE& direction, SPRITE* parent)
         : CREATURE(owner, vid, xyz, direction, parent)
     {
@@ -107,7 +82,7 @@ namespace as1
                         continue;
                     const float dx = candidate->X() - X();
                     const float dy = candidate->Y() - Y();
-                    if (approximatePlanarDistance(dx, dy) < 150.0L)
+                    if (approximatePlanarDistance(dx, dy) < 150.0f)
                     {
                         auto* const robot = static_cast<CIV_ROBOT*>(candidate);
                         robot->m_damageReactionPending = 1u;
@@ -500,8 +475,8 @@ namespace as1
             const REGION* const region = static_cast<const REGION*>(regionSprite);
             const float halfX = region->regionWidth() * 0.5f;
             const float halfY = region->regionHeight() * 0.5f;
-            if (candidate.x < region->X() - halfX || candidate.x > region->X() + halfX ||
-                candidate.y < region->Y() - halfY || candidate.y > region->Y() + halfY)
+            if (!(candidate.x >= region->X() - halfX) || !(candidate.x <= region->X() + halfX) ||
+                !(candidate.y >= region->Y() - halfY) || !(candidate.y <= region->Y() + halfY))
             {
                 SPRITE* const nextRegion = findContainingRegion(candidate.x, candidate.y);
                 if (!nextRegion || !currentRegion() ||
@@ -511,15 +486,11 @@ namespace as1
             }
         }
 
+        // Steam 1.22 CIV_ROBOT::MoveTact 0x45BE3D: leaving the map uses the
+        // CIV-specific blocked path directly.  It does not dispatch a synthetic path-limit action.
         if (!(candidate.x >= 0.0f) || !(candidate.x < map->SizeX()) ||
             !(candidate.y >= 0.0f) || !(candidate.y < map->SizeY()))
-        {
-            dispatchVirtualAction(ActionCode::ACT_PATH_LIMIT,
-                                     civSubtractAndConvertToInt32(candidate.x, X()),
-                                     civSubtractAndConvertToInt32(candidate.y, Y()),
-                                     civSubtractAndConvertToInt32(candidate.z, Z()));
-            return;
-        }
+            goto blocked;
 
         {
             SPRITE* const collision = CanPlaceWithCrush(candidate.x, candidate.y, Z());
@@ -572,7 +543,7 @@ namespace as1
 
     blocked:
         // The game logic is CIV-specific.  It does not delegate to the
-        // generic ACT_PATH_BLOCK axis-slide behavior.
+        // generic axis-slide behavior.
         setSpeedDirect(0.0f);
         if (turnTimer() == 0)
             setTurnTimer((std::rand() % 2) != 0 ? 10 : -10);

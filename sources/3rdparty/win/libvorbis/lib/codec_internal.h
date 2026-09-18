@@ -384,7 +384,7 @@ namespace as1 { namespace thirdparty { namespace xiph2003
         unsigned char* reserveSyncBuffer(VorbisStateBlob& state, int bytes);
         void markSyncBytesWritten(VorbisStateBlob& state, int bytes);
         void resetSyncReadPosition(VorbisStateBlob& state);
-        std::uint32_t oggCrcTableValue(unsigned int index);
+        std::uint32_t oggCrc32TableValue(unsigned int index);
         std::uint32_t updateOggChecksum(std::uint32_t checksum, const unsigned char* data, int size);
         void writePageToken(PageToken& page, unsigned char* header, int headerBytes, unsigned char* body, int bodyBytes);
         unsigned char* pageHeaderPointer(const PageToken& page);

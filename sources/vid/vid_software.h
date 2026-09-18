@@ -20,7 +20,6 @@ public:
     void SetLayer() override;
     void SetGamma(const Gamma& gamma, unsigned n_gamma = 0);
     void Draw(const SPRITE* sprite) override;
-    int updateGroundZFromCompactFrame(const SPRITE* sprite) noexcept;
     int DrawShadow(const SPRITE* sprite) const override;
     int HaveShadow() const override;
     bool transparencyCheck() const;

@@ -16,7 +16,6 @@ namespace as1
         VID_FONT* CreateMirror() override;
         void Draw(const SPRITE* sprite) override;
         void Load(RESOURCE* resource) override;
-        int HaveShadow() const override;
         void SetLayer() override;
 
         int InvalidateDeviceObjects() noexcept;

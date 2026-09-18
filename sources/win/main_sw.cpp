@@ -82,8 +82,8 @@ namespace as1 { namespace win
             SetWindowTextA(dialog, core::StartupSettings().title);
             hideRetailDisabledStartControls(dialog);
 
-            dialogBloodPassword() = FileDataLoad(STRING("options:\\Password"), STRING(""));
-            const int highQuality = std::atoi(FileDataLoad(STRING("options:\\sound\\SoundHighQuality"), STRING("1")).c_str());
+            dialogBloodPassword() = FLoadData(STRING("options://Password"), STRING(""));
+            const int highQuality = std::atoi(FLoadData(STRING("options://sound/SoundHighQuality"), STRING("1")).c_str());
             SendDlgItemMessageA(dialog, IDC_START_SOUND_HQ, BM_SETCHECK,
                                 highQuality != 0 ? BST_CHECKED : BST_UNCHECKED, 0);
 
@@ -93,7 +93,7 @@ namespace as1 { namespace win
                                 reinterpret_cast<LPARAM>("Green Blood"));
             SendDlgItemMessageA(dialog, IDC_START_BLOOD_MODE, CB_ADDSTRING, 0,
                                 reinterpret_cast<LPARAM>("Red Blood"));
-            const int blood = std::atoi(FileDataLoad(STRING("save:\\common\\Blood"), STRING("0")).c_str());
+            const int blood = std::atoi(FLoadData(STRING("save://common/Blood"), STRING("0")).c_str());
             SendDlgItemMessageA(dialog, IDC_START_BLOOD_MODE, CB_SETCURSEL,
                                 static_cast<WPARAM>(blood), 0);
             if (SendDlgItemMessageA(dialog, IDC_START_BLOOD_MODE, CB_GETCURSEL, 0, 0) != 0)
@@ -119,23 +119,23 @@ namespace as1 { namespace win
         if (controlId == IDOK)
         {
             syncGraphDialog(dialog);
-            FileDataSave(
-                STRING("options:\\sound\\SoundHighQuality"),
+            FSaveData(
+                STRING("options://sound/SoundHighQuality"),
                 STRING(SendDlgItemMessageA(dialog, IDC_START_SOUND_HQ, BM_GETCHECK, 0, 0) == BST_CHECKED ? "1" : "0"));
-            FileDataSave(
-                STRING("save:\\common\\Blood"),
+            FSaveData(
+                STRING("save://common/Blood"),
                 STRING(std::to_string(static_cast<unsigned char>(
                     SendDlgItemMessageA(dialog, IDC_START_BLOOD_MODE, CB_GETCURSEL, 0, 0)))));
 
             STRING editText;
             readDialogItemText(DialogItemRef{dialog, IDC_START_BLOOD_PASSWORD}, editText);
 
-            const STRING storedPassword = FileDataLoad(STRING("options:\\Password"), STRING(""));
+            const STRING storedPassword = FLoadData(STRING("options://Password"), STRING(""));
             if (std::strcmp(storedPassword.c_str(), editText.c_str()) != 0)
             {
                 STRING editTextForWrite;
                 readDialogItemText(DialogItemRef{dialog, IDC_START_BLOOD_PASSWORD}, editTextForWrite);
-                FileDataSave(STRING("options:\\Password"), editTextForWrite);
+                FSaveData(STRING("options://Password"), editTextForWrite);
             }
 
             EndDialog(dialog, 1);

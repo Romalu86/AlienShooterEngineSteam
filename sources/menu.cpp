@@ -125,9 +125,12 @@ namespace as1
 
                 float x = authoredX + integerShiftX;
                 float y = viewportTop + authoredY + integerShiftY + z;
-                if (authoredX <= 924.0f)
+                // Retail uses COMISS/JBE for both upper-bound branches.
+                // JBE is also taken for unordered operands, so express the
+                // test as "not ordered-greater" rather than C++ <=.
+                if (!(authoredX > 924.0f))
                 {
-                    if (authoredY <= 668.0f)
+                    if (!(authoredY > 668.0f))
                     {
                         if (authoredX < 100.0f)
                             x = viewportLeft + authoredX + integerShiftX;
@@ -270,9 +273,12 @@ namespace as1
                 const float deltaX = sprite->X() - expectedX;
                 const float deltaY = sprite->Y() - expectedY;
                 const float deltaZ = sprite->Z() - authoredZ;
-                if (std::fabs(static_cast<double>(deltaX)) >= kRetailPositionEpsilon ||
-                    std::fabs(static_cast<double>(deltaY)) >= kRetailPositionEpsilon ||
-                    std::fabs(static_cast<double>(deltaZ)) >= kRetailPositionEpsilon)
+                // Steam compares 0.001 <= abs(delta) with COMISD/JBE.
+                // Unordered values also take the reject branch; spelling this
+                // as !(abs < epsilon) preserves that NaN behavior.
+                if (!(std::fabs(static_cast<double>(deltaX)) < kRetailPositionEpsilon) ||
+                    !(std::fabs(static_cast<double>(deltaY)) < kRetailPositionEpsilon) ||
+                    !(std::fabs(static_cast<double>(deltaZ)) < kRetailPositionEpsilon))
                     continue;
 
                 (void)releaseByIndexRetail(i);
@@ -305,7 +311,7 @@ namespace as1
                 continue;
 
             if (!sprite->IsInsideRetail(input->worldX, input->worldY) ||
-                (m_selectedSprite && sprite->Z() <= m_selectedSprite->Z()))
+                (m_selectedSprite && !(sprite->Z() > m_selectedSprite->Z())))
             {
                 sprite->ChangeAnimation(animation & 1);
                 continue;

@@ -225,7 +225,6 @@
     <ClCompile Include="sources\images\picture.cpp" />
     <ClCompile Include="sources\vid\vid.cpp" />
     <ClCompile Include="sources\vid\vid_software.cpp" />
-    <ClCompile Include="sources\vid\vid_software_png.cpp" />
     <ClCompile Include="sources\vid\vid_software16.cpp" />
     <ClCompile Include="sources\vid\vid_hardware.cpp" />
     <ClCompile Include="sources\vid\vid_hardware_z.cpp" />
@@ -339,9 +338,6 @@
     <ClCompile Include="sources\core\log.cpp" />
     <ClCompile Include="sources\core\logger.cpp" />
     <ClCompile Include="sources\menu.cpp" />
-    <None Include="sources\menu_item.cpp" />
-    <None Include="sources\menu\menu_actions_list.cpp" />
-    <None Include="sources\menu\navigation_list.cpp" />
     <ClCompile Include="sources\sound\engine.cpp">
       <ObjectFileName>$(IntDir)sound_engine.obj</ObjectFileName>
     </ClCompile>
@@ -381,7 +377,6 @@
     <ClInclude Include="sources\images\picture.h" />
     <ClInclude Include="sources\vid\vid.h" />
     <ClInclude Include="sources\vid\vid_software.h" />
-    <ClInclude Include="sources\vid\vid_software_png.h" />
     <ClInclude Include="sources\vid\vid_software16.h" />
     <ClInclude Include="sources\vid\vid_hardware.h" />
     <ClInclude Include="sources\vid\vid_hardware_z.h" />
@@ -448,10 +443,6 @@
     <ClInclude Include="sources\core\logger.h" />
     <ClInclude Include="sources\core\logger_p.h" />
     <ClInclude Include="sources\menu.h" />
-    <ClInclude Include="sources\menu_item.h" />
-    <ClInclude Include="sources\menu_const.h" />
-    <ClInclude Include="sources\menu\menu_actions_list.h" />
-    <ClInclude Include="sources\menu\navigation_list.h" />
     <ClInclude Include="sources\sound\engine.h" />
   </ItemGroup>
   <ItemGroup>

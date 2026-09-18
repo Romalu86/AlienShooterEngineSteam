@@ -30,18 +30,33 @@ namespace as1
         ResolvedFileDataPath resolveFileDataPath(const STRING& input)
         {
             std::string path = input.c_str() ? input.c_str() : "";
-            for (std::size_t at = path.find('/'); at != std::string::npos; at = path.find('/', at))
-                path.erase(at, 1u);
+
+            // The original FSaveData/FLoadData helpers (Steam sub_464B90 /
+            // sub_464A60) compare against the literal prefixes "options:\\\\"
+            // (10 bytes) and "save:\\\\" (7 bytes).  Script source spells
+            // those prefixes as options:// and save://; the retail string/path layer
+            // normalizes each forward slash to a backslash without deleting it.
+            // Deleting '/' collapsed options://graph/FullScreen into
+            // options:graphFullScreen, so the prefix was never recognized and the
+            // value was incorrectly written into save.ini.
+            for (char& ch : path)
+            {
+                if (ch == '/')
+                    ch = '\\';
+            }
+
+            static const char kOptionsPrefix[] = "options:\\\\";
+            static const char kSavePrefix[] = "save:\\\\";
 
             std::string fileName = saveProfilePath();
-            if (path.compare(0u, 10u, "options:\\") == 0)
+            if (path.compare(0u, sizeof(kOptionsPrefix) - 1u, kOptionsPrefix) == 0)
             {
                 fileName = optionsProfilePath();
-                path.erase(0u, 10u);
+                path.erase(0u, sizeof(kOptionsPrefix) - 1u);
             }
-            else if (path.compare(0u, 7u, "save:\\") == 0)
+            else if (path.compare(0u, sizeof(kSavePrefix) - 1u, kSavePrefix) == 0)
             {
-                path.erase(0u, 7u);
+                path.erase(0u, sizeof(kSavePrefix) - 1u);
             }
 
             return {std::move(fileName), std::move(path)};
@@ -93,8 +108,11 @@ namespace as1
             const std::size_t slash = entryPath.find('\\');
             if (slash == std::string::npos)
             {
-                section = entryPath;
-                key.clear();
+                // Retail profile entries without a section separator use the
+                // empty section.  WindowPositionX/Y are written this way and
+                // appear under [] in the original options.ini.
+                section.clear();
+                key = entryPath;
                 return;
             }
             section.assign(entryPath.data(), slash);
@@ -222,7 +240,7 @@ namespace as1
         saveProfilePath() = base + "\\saves\\save.ini";
     }
 
-    void FileDataSave(const STRING& path, const STRING& value)
+    void FSaveData(const STRING& path, const STRING& value)
     {
         const ResolvedFileDataPath resolved = resolveFileDataPath(path);
         std::string contents = loadWholeFile(resolved.fileName.c_str());
@@ -230,14 +248,14 @@ namespace as1
         storeWholeFile(resolved.fileName.c_str(), contents);
     }
 
-    STRING FileDataLoad(const STRING& path, const STRING& defaultValue)
+    STRING FLoadData(const STRING& path, const STRING& defaultValue)
     {
         const ResolvedFileDataPath resolved = resolveFileDataPath(path);
         const std::string contents = loadWholeFile(resolved.fileName.c_str());
         return STRING(readRetailIniValue(contents, resolved.entryPath, defaultValue.c_str()).c_str());
     }
 
-    int FileDataFileExists(const STRING& filename)
+    int FileDataFileExist(const STRING& filename)
     {
         std::FILE* file = std::fopen(filename.c_str(), "rb");
         if (!file)
@@ -246,7 +264,7 @@ namespace as1
         return 1;
     }
 
-    const char* FileDataSaveFolder() noexcept
+    const char* FSaveDataFolder() noexcept
     {
         // Native 189 pushes the physical Application/MAP owner STRING at +0x18.
         return core::ApplicationSavePath().c_str();

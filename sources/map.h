@@ -31,7 +31,7 @@ namespace as1
     class GRAPH;
     namespace win { class ApplicationWin; }
 
-    long double approximatePlanarDistance(float dx, float dy) noexcept;
+    float approximatePlanarDistance(float dx, float dy) noexcept;
 
     struct WEAPON
     {
@@ -187,15 +187,10 @@ namespace as1
         float SizeY() const { return m_sizeXY.y; }
         float ToScreenX(float x) const;
         float ToScreenY(float y, float z = 0.0f) const;
-        VECTOR2 ToScreenScaled(const VECTOR& world) const;
-        float ToScreenScaledShiftX(float x, float shiftX, float scale) const;
-        float ToScreenScaledShiftY(float y, float z, float shiftY, float scale) const;
-        float FromScreenScaledShiftX(float x, float shiftX, float scale) const;
-        float FromScreenScaledShiftY(float y, float z, float shiftY, float scale) const;
         void SetScrollBox(float minX, float minY, float maxX, float maxY);
 
-        void SetShiftCoor(float centerX, float centerY, int effect = 0);
-        void SetShiftCoor(const VECTOR2& center, int effect = 0) { SetShiftCoor(center.x, center.y, effect); }
+        void SetPosition(float centerX, float centerY, int effect = 0);
+        void SetPosition(const VECTOR2& center, int effect = 0) { SetPosition(center.x, center.y, effect); }
         int noGridX() const { return terrainGridWidth(); }
         int noGridY() const { return terrainGridHeight(); }
 #ifdef _WIN32
@@ -210,7 +205,6 @@ namespace as1
 #endif
         VID* hostCreateVid(RESOURCE* res, int nvid);
         VID* createVIDByType(WORD type, DWORD spriteClass) const;
-        VID* createVIDByType(VID::VidType type, bool parentPreloaded, bool letterAtlasAutoCreation) const;
         VID* Vid(int nvid) const;
         bool ValidateVid(int nvid) const
         {
@@ -235,7 +229,6 @@ namespace as1
         void hostReleaseLinkVidRuntime();
         bool startLoadMap(RESOURCE* map);
         void loadGridZ(RESOURCE* map);
-        int hostReinitializeGridFromMapSize();
         bool loadSprites(RESOURCE* map);
         bool loadSpriteRestoreData(RESOURCE* map);
         int spriteRestoreActionOpcode() const;

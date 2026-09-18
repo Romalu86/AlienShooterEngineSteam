@@ -35,31 +35,6 @@ namespace as1
             return bits;
         }
 
-        DWORD paletteBgra(const VID& vid, BYTE index)
-        {
-#if defined(_MSC_VER) && defined(_M_IX86)
-            // The Stage11 32-bit sidecar palette has no production population path.
-            // Preserve its effective grayscale fallback without linking the
-            // legacy vector/unordered_map decode subsystem.
-            (void)vid;
-            const DWORD v = static_cast<DWORD>(index);
-            return 0xFF000000u | (v << 16u) | (v << 8u) | v;
-#else
-            const auto& palette = vid.palette();
-            if (palette.empty())
-            {
-                const DWORD v = static_cast<DWORD>(index);
-                return 0xFF000000u | (v << 16u) | (v << 8u) | v;
-            }
-            const VID::PaletteEntry& e = palette[static_cast<std::size_t>(index) % palette.size()];
-            const BYTE a = (vid.formatFlags() & VID_TYPE_ALPHA) != 0 ? e.a : 0xFFu;
-            return (static_cast<DWORD>(a) << 24u) |
-                   (static_cast<DWORD>(e.r) << 16u) |
-                   (static_cast<DWORD>(e.g) << 8u) |
-                   static_cast<DWORD>(e.b);
-#endif
-        }
-
         constexpr DWORD kD3dRenderStateZFunc = 23u;
         constexpr DWORD kD3dRenderStateAlphaBlendEnable = 27u;
         constexpr DWORD kD3dCmpGreaterEqual = 7u;
@@ -69,17 +44,37 @@ namespace as1
         constexpr DWORD kD3dBlendInvSrcAlpha = 6u;
         constexpr DWORD kD3dBlendDestColor = 9u;
 
+        int hardwareConvertFloatToInt32(float value) noexcept;
+
+        int hardwareCurveOffset(int baseOffset, int segment, int lane) noexcept
+        {
+            // Retail addressing is 32-bit [weapon + segment*4 + base].
+            const std::uint32_t scaled = static_cast<std::uint32_t>(segment) * 4u;
+            const std::uint32_t offset = static_cast<std::uint32_t>(baseOffset) +
+                                         scaled + static_cast<std::uint32_t>(lane * 4);
+            return static_cast<std::int32_t>(offset);
+        }
+
         float interpolateHardwareEffectCurve(const VID_HARDWARE* owner,
                                              float position,
                                              int baseOffset) noexcept
         {
-            const int segment = static_cast<int>(position);
+            const int segment = hardwareConvertFloatToInt32(position);
             if (segment >= 7)
                 return owner->weaponFloatAt(baseOffset + 7 * 4);
 
-            const float first = owner->weaponFloatAt(baseOffset + segment * 4);
-            const float second = owner->weaponFloatAt(baseOffset + (segment + 1) * 4);
-            return (second - first) * (position - static_cast<float>(segment)) + first;
+            const float first = owner->weaponFloatAt(hardwareCurveOffset(baseOffset, segment, 0));
+            const float second = owner->weaponFloatAt(hardwareCurveOffset(baseOffset, segment, 1));
+#if defined(_MSC_VER) && defined(_M_IX86)
+            __m128 delta = _mm_sub_ss(_mm_set_ss(second), _mm_set_ss(first));
+            __m128 segmentF = _mm_cvtsi32_ss(_mm_setzero_ps(), segment);
+            __m128 fraction = _mm_sub_ss(_mm_set_ss(position), segmentF);
+            return _mm_cvtss_f32(_mm_add_ss(_mm_mul_ss(delta, fraction), _mm_set_ss(first)));
+#else
+            const float delta = second - first;
+            const float fraction = position - static_cast<float>(segment);
+            return delta * fraction + first;
+#endif
         }
 
         std::int32_t retailWrapAdd32(std::int32_t a, std::int32_t b) noexcept
@@ -797,9 +792,9 @@ namespace as1
 
         for (int sample = 0; sample < sampleCount; ++sample)
         {
-            int screenX = hardwareSubtractAndConvertToInt32(currentX, cameraX) + effectOffsetX;
-            int screenY = hardwareSubtractTwoAndConvertToInt32(currentY, currentZ, cameraY) + effectOffsetY;
-            int spriteZInt = hardwareConvertFloatToInt32(currentZ) + effectOffsetZ;
+            int screenX = retailWrapAdd32(hardwareSubtractAndConvertToInt32(currentX, cameraX), effectOffsetX);
+            int screenY = retailWrapAdd32(hardwareSubtractTwoAndConvertToInt32(currentY, currentZ, cameraY), effectOffsetY);
+            int spriteZInt = retailWrapAdd32(hardwareConvertFloatToInt32(currentZ), effectOffsetZ);
 
             if ((property & P_BLUR) != 0u)
             {
@@ -846,7 +841,9 @@ namespace as1
 
                 const WORD* depth = graph->softwareDepthBuffer();
                 const int pitch = graph->softwareDepthPitch();
-                if (depth[screenX + screenY * pitch] > spriteZInt * 8 + 0x400)
+                const int depthIndex = retailWrapAdd32(screenX, retailWrapMul32(screenY, pitch));
+                const int depthThreshold = retailWrapAdd32(retailWrapMul32(spriteZInt, 8), 0x400);
+                if (depth[depthIndex] > depthThreshold)
                     continue;
             }
 
@@ -865,16 +862,16 @@ namespace as1
                 if (record.height == 0)
                     break;
 
-                const int left = screenX + static_cast<int>(
-                    static_cast<float>(record.destinationX - static_cast<int>(vidWidth()) / 2) * drawScaleX);
-                const int top = screenY + static_cast<int>(
-                    static_cast<float>(record.destinationY - static_cast<int>(vidHeight()) / 2) * drawScaleY);
+                const int left = retailWrapAdd32(screenX, hardwareConvertFloatToInt32(
+                    static_cast<float>(record.destinationX - static_cast<int>(vidWidth()) / 2) * drawScaleX));
+                const int top = retailWrapAdd32(screenY, hardwareConvertFloatToInt32(
+                    static_cast<float>(record.destinationY - static_cast<int>(vidHeight()) / 2) * drawScaleY));
 
                 int drawWidth = record.width;
                 int drawHeight = record.height;
                 const GraphViewportState& viewport = graph->viewportState();
-                if (left + drawWidth >= g_softwareClipLeft && left < g_softwareClipRight &&
-                    top + drawHeight >= g_softwareClipTop && top < g_softwareClipBottom)
+                if (retailWrapAdd32(left, drawWidth) >= g_softwareClipLeft && left < g_softwareClipRight &&
+                    retailWrapAdd32(top, drawHeight) >= g_softwareClipTop && top < g_softwareClipBottom)
                 {
                     if ((typeFlags & VID_TYPE_ZBUFFER) != 0u)
                     {
@@ -887,8 +884,8 @@ namespace as1
                     RECTI destination{
                         left,
                         top,
-                        left + static_cast<int>(static_cast<float>(drawWidth) * drawScaleX),
-                        top + static_cast<int>(static_cast<float>(drawHeight) * drawScaleY)
+                        retailWrapAdd32(left, hardwareConvertFloatToInt32(static_cast<float>(drawWidth) * drawScaleX)),
+                        retailWrapAdd32(top, hardwareConvertFloatToInt32(static_cast<float>(drawHeight) * drawScaleY))
                     };
                     RECTI source{
                         record.sourceX,

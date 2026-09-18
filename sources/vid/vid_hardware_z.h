@@ -16,6 +16,7 @@ public:
     void SetGamma(const Gamma& gamma, unsigned n_gamma = 0);
     void SetGammaRaw(const GammaRawPair& rawGamma, unsigned n_gamma) override;
     void Draw(const SPRITE* sprite) override;
+    void DrawToVid(SPRITE* sprite, void* texSize, BASE_TEXTURE* texture, BASE_TEXTURE* zTexture) override;
     bool transparencyCheck() const;
     bool isLoaded() const;
 };
