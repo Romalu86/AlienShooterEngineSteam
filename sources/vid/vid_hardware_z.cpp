@@ -288,6 +288,9 @@ namespace as1
         }
 
         const int visibleHeightSpan = activeBottom - activeTop;
+        // Empty animation frames have no pixels to upload or draw.
+        if (visibleHeightSpan <= 0)
+            return;
         RECTI destinationRect{ drawLeft, activeTop, drawLeft + sizeX, activeBottom };
         RECTI sourceRect{ 0, 0, sizeX, visibleHeightSpan };
 
@@ -310,7 +313,9 @@ namespace as1
         const std::uint16_t* depthRow = screenDepth +
             static_cast<std::ptrdiff_t>(activeTop) * screenDepthPitch;
 
-        for (int rowIndex = 0; rowIndex <= visibleHeightSpan; ++rowIndex)
+        // The frame stores a row count, and activeBottom is exclusive.
+        // Reading one extra row overruns the frame and can overrun screenDepth.
+        for (int rowIndex = 0; rowIndex < visibleHeightSpan; ++rowIndex)
         {
             std::fill_n(scratchRow, scratchPitchWords, static_cast<WORD>(0));
 
